@@ -8,7 +8,7 @@ This guide installs the MCP server, adds it to Claude Code or Codex, and connect
 |---|---|---|
 | Node.js | 24 or later | `node --version` |
 | Bun (optional, recommended) | 1.4 or later | `bun --version` (install: `brew install oven-sh/bun/bun`) |
-| Google Chrome or Chromium | 125 or later | Chrome is in `/Applications`, or set `BBM_CHROME` |
+| Google Chrome or Chromium | 125 or later | `chrome://version` |
 | Claude Code and/or Codex CLI | current | `claude --version`, `codex --version` |
 
 ## 2. Get the code and install
@@ -43,7 +43,7 @@ codex mcp add bbm -- node "$PWD/src/server.ts"     # Node
 
 Then do a check. `claude mcp list` must show `bbm: ... ✔ Connected`. `codex mcp list` must show `bbm` with status `enabled`.
 
-With no other settings, the server uses your Chrome through the relay extension (`extension` mode). Complete step 4 to load and pair it. To open a fresh headless Chromium with an empty profile instead, explicitly set `BBM_MODE=launch`.
+With no other settings, the server uses your Chrome through the relay extension (`extension` mode). Complete step 4 to load and pair it.
 
 ## 4. Use your real Chrome profile (extension mode)
 
@@ -81,7 +81,7 @@ The agent works in the background. It does not switch your active tab or focus a
 | `-e BBM_KEEP_TABS=1` | Agent tabs stay open after the session ends, for example to examine a draft. |
 | `-e BBM_FRONT=1` | Old behavior: the agent brings its tab to the front. |
 
-Up to 30 agent sessions can use the same Chrome at the same time (for example, several Claude Code windows). Each server uses the first free port of 9333-9362. The extension tries the ports up to 2 past the highest connected one, and all 30 once every 5 minutes, so the error list in `chrome://extensions` stays short. A server keeps its port while it runs: after an extension reload, a Chrome restart or a sleep, the next tool call waits for the extension to connect again (up to 30 s) and continues. The agent is told that its earlier tabs are gone. You need `/mcp` only after a change to the server code. Each session sees only its own tabs, in its own group. The group is named after the project and the slot, for example **Agent:CT2** for `connected-things` in slot 2 (`BBM_LABEL` sets a fixed name). The agent is asked to rename it for its task with 1-5 letters, digits or emoji: `tabs action=label label=ALD` gives **Agent:ALD**, `label=🧪` gives **Agent:🧪**. When a sleep leaves a dead link, the extension's next connection replaces it. A session opens no tab until its first `navigate` or `tabs new`. Agent groups that no live session owns (left after a Chrome restart, for example) close after 7 days without use. Change the number of days on the extension options page (0 = never).
+Up to 30 agent sessions can use the same Chrome at the same time (for example, several Claude Code windows). Each server uses the first free port of 9333-9362. The extension tries the ports up to 2 past the highest connected one, and all 30 once every 5 minutes, so the error list in `chrome://extensions` stays short. A server keeps its port while it runs: after an extension reload, a Chrome restart or a sleep, the next tool call waits for the extension to connect again (up to 30 s) and continues. The agent is told that its earlier tabs are gone. You need `/mcp` only after a change to the server code. Each session sees only its own tabs, in its own group. The group is named after the project and the slot, for example **Agent:CT2** for `connected-things` in slot 2 (`BBM_LABEL` sets a fixed name). The agent is asked to rename it for its task with 1-5 letters, digits or emoji: `tabs action=label label=ALD` gives **Agent:ALD**, `label=🧪` gives **Agent:🧪**. Add `color=green` (or grey, blue, red, yellow, pink, purple, cyan, orange) to color the group; `color` alone keeps the name. The default is purple. When a sleep leaves a dead link, the extension's next connection replaces it. A session opens no tab until its first `navigate` or `tabs new`. Agent groups that no live session owns (left after a Chrome restart, for example) close after 7 days without use. Change the number of days on the extension options page (0 = never).
 
 ### Network, emulation and performance
 
@@ -108,7 +108,6 @@ The correct answer is "Example Domain". In extension mode, a new tab opens in an
 
 | Symptom | Cause and fix |
 |---|---|
-| `No Chromium found; set BBM_CHROME` | Install Google Chrome, or set `-e BBM_CHROME=/path/to/chrome` |
 | `extension did not connect/pair` after 2 minutes | The extension is not loaded, is turned off, or has no token. Do step 4 again. Then restart the agent. |
 | `pairing failed` on stderr | The token in the extension is not the same as the file. Paste it again. |
 | `Bbm.setLabel is not supported by the extension relay` | The connected extension is older than the server. Run `npm run build:extension` from `prototype/`, then reload the relay at `chrome://extensions`. Ensure it loads `prototype/dist/extension`, not an older copy. |

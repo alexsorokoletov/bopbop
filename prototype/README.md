@@ -25,7 +25,6 @@ Node 24+ also runs the server: replace `bun` with `node`.
 
 | Mode | What it does | Settings |
 |---|---|---|
-| `launch` | Starts a fresh Chromium with a temporary profile. Headless unless `BBM_HEADLESS=0`. | `BBM_CHROME`: the browser binary; `BBM_CHROME_ARGS`: extra flags (e.g. `--no-sandbox` in CI) |
 | `connect` | Attaches to a running browser over CDP. | `BBM_CDP_URL=http://127.0.0.1:9222` |
 | `extension` (default) | Drives **your real Chrome profile** through the relay extension (build and load `dist/extension` unpacked). | `BBM_RELAY_PORT` pins one port; default: the first free port of 9333–9362 (30 sessions) |
 

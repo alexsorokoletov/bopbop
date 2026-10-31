@@ -85,6 +85,27 @@ test('an empty label restores the default title', async () => {
   assert.deepEqual(await groups(), ['Agent:CT82']);
 });
 
+const colors = () => swEval('chrome.tabGroups.query({}).then((gs) => gs.map((g) => g.title + "/" + g.color))');
+
+test('color sets the tab group color; a color alone keeps the label', async () => {
+  assert.equal(await c.setLabel('GW44', 'green'), 'tab group: Agent:GW44 (green)');
+  assert.deepEqual(await colors(), ['Agent:GW44/green']);
+  await c.setLabel(undefined, 'orange');
+  assert.deepEqual(await colors(), ['Agent:GW44/orange']);
+  await c.setLabel('ALD');
+  assert.deepEqual(await colors(), ['Agent:ALD/orange']); // a label alone keeps the color
+  await assert.rejects(c.setLabel(undefined, 'teal'), /color must be one of/);
+  assert.deepEqual(await colors(), ['Agent:ALD/orange']);
+});
+
+test('after a service-worker restart, a new tab joins our colored group', async () => {
+  await swEval('bbmForget()');
+  await c.newTab(`${srv.base}/login-form/?color=1`);
+  assert.deepEqual(await colors(), ['Agent:ALD/orange']);
+  await c.setLabel('', 'purple');
+  assert.deepEqual(await colors(), ['Agent:CT82/purple']);
+});
+
 test('after a service-worker restart, a new tab joins the group with our title instead of a second one', async () => {
   await swEval('bbmForget()');
   await c.newTab(`${srv.base}/login-form/?again=1`);

@@ -79,8 +79,6 @@ Then load the Chrome extension ([2-minute guide](prototype/INSTALL.md)) and ask:
 
 > *Use bbm. Open example.com and tell me the heading.*
 
-If you do not want to use your own Chrome, set `BBM_MODE=launch` for a fresh headless browser.
-
 ## Why it feels different
 
 **It stays out of your way.** The agent works in its own tab group. It never takes your active tab and never steals focus. Up to 30 sessions share one Chrome, and each session sees only its own tabs. If you reload the extension or restart Chrome, the next call reconnects.
