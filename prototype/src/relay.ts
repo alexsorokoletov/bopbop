@@ -16,9 +16,10 @@ import { CDPBrowser } from './cdp/browser.ts';
 // ws gives a Buffer for text frames, but its type also allows ArrayBuffer and fragment lists.
 const rawText = (d: Buffer | ArrayBuffer | Buffer[]) => (Array.isArray(d) ? Buffer.concat(d) : Buffer.isBuffer(d) ? d : Buffer.from(d)).toString();
 
-const TOKEN_FILE = join(homedir(), '.config', 'better-browser-mcp', 'relay-token');
+export const TOKEN_FILE = join(homedir(), '.config', 'better-browser-mcp', 'relay-token');
 
-function relayToken(): string {
+/** BBM_RELAY_TOKEN, or the token file (made once). */
+export function relayToken(): string {
   if (process.env.BBM_RELAY_TOKEN) return process.env.BBM_RELAY_TOKEN;
   if (existsSync(TOKEN_FILE)) return readFileSync(TOKEN_FILE, 'utf8').trim();
   mkdirSync(dirname(TOKEN_FILE), { recursive: true, mode: 0o700 });

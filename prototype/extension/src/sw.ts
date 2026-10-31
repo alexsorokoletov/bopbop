@@ -12,7 +12,7 @@ const PROTOCOL = '1.3';
 // Servers take the first free port, so live ones sit at the low slots: we try only up to 2 slots past the highest
 // live one. Every `sweep` ms (also after a service-worker restart, which forgets what was live) we also try the
 // other slots, one per tick.
-const backoff = { min: 1000, max: 10000, sweep: 5 * 60_000 };
+const backoff = { min: 1000, max: 10000, sweep: 5 * 60_000, nativeAsk: 10_000 };
 
 // CDP params and results pass through untouched.
 type Json = any;
@@ -300,8 +300,12 @@ class Session {
         return sock.close();
       }
       if (stage === 'hello' && m.type === 'hello') {
-        // The server must prove it knows the token before we run anything.
-        if (m.proof !== (await hmac(token, `server:${nonce}`))) return sock.close();
+        // The server must prove it knows the token before we run anything. A wrong proof may mean the server's
+        // token changed: ask the native host for the current one (a new token reconnects through storage.onChanged).
+        if (m.proof !== (await hmac(token, `server:${nonce}`))) {
+          void tokenFromNativeHost(token);
+          return sock.close();
+        }
         stage = 'auth';
         sock.send(JSON.stringify({ type: 'auth', proof: await hmac(token, `ext:${m.nonce}`) }));
       } else if (stage === 'auth' && m.type === 'ready') {
@@ -408,10 +412,35 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (s.discover) s.send({ method: 'Target.targetDestroyed', params: { targetId: String(tabId) } });
 });
 
+// ---- zero-paste pairing: the native host the MCP server installs gives the token to this extension only
+// (its manifest's allowed_origins). At most one ask per backoff.nativeAsk: each ask starts a process.
+const NATIVE_HOST = 'dev.bopbop.host';
+let lastNativeAsk = 0;
+async function tokenFromNativeHost(current: string) {
+  if (Date.now() - lastNativeAsk < backoff.nativeAsk) return;
+  // Only a token the host gave can be replaced. A pasted one (options page, or saved before native pairing
+  // existed: no tokenSource) is the user's.
+  const { tokenSource } = await chrome.storage.local.get<{ tokenSource?: string }>('tokenSource');
+  if (current && tokenSource !== 'native') return;
+  lastNativeAsk = Date.now();
+  try {
+    const reply = await chrome.runtime.sendNativeMessage(NATIVE_HOST, { type: 'pair' });
+    const token = typeof reply?.token === 'string' ? reply.token : '';
+    // The user may have saved a token while we waited: then theirs stays.
+    const { token: now = '' } = await chrome.storage.local.get<{ token?: string }>('token');
+    if (token.length >= 16 && token !== current && now === current) await chrome.storage.local.set({ token, tokenSource: 'native' });
+  } catch {
+    /* no host installed (the MCP server never ran here) or a browser without native messaging: paste the token */
+  }
+}
+
 let sweepCursor = SLOTS; // next slot of the running sweep (SLOTS = no sweep running)
 async function connectAll() {
   const { port = DEFAULT_PORT, token = '' } = await chrome.storage.local.get<{ port?: number; token?: string }>(['port', 'token']);
-  if (!token) return; // not paired: never connect
+  if (!token) {
+    void tokenFromNativeHost(''); // not paired: ask the native host, never connect without a token
+    return;
+  }
   // storage.session outlives a service-worker restart, so a worker that Chrome restarts every 30 s does not sweep each time.
   // A sweep tries one slot outside the window per tick, never all at once: Chrome queues connects to one host,
   // and a burst of refused ones would delay the pairing of a real server.

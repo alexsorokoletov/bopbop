@@ -2,7 +2,7 @@
 <style>body{font:14px system-ui;margin:24px;max-width:520px}input{width:100%;padding:6px;margin:4px 0 12px;font:13px monospace}</style>
 <h1>better-browser-mcp relay</h1>
 <p id="build"></p>
-<p>Paste the pairing token from <code>~/.config/better-browser-mcp/relay-token</code> (or <code>BBM_RELAY_TOKEN</code>). The token stays in this browser; only HMAC proofs are sent.</p>
+<p>Pairing is automatic once the MCP server has run on this computer. If it does not pair, paste the token from <code>~/.config/better-browser-mcp/relay-token</code> (or <code>BBM_RELAY_TOKEN</code>). The token stays in this browser; only HMAC proofs are sent.</p>
 <label>Token <input id="token" type="password" autocomplete="off"></label>
 <label>Port <input id="port" type="number" value="9333"></label>
 <label>Close unused agent groups after (days, 0 = never) <input id="cleanupDays" type="number" min="0" value="7"></label>

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Lets a local better-browser-mcp server control agent tabs in this browser (local WebSocket only, no cloud).",
   "minimum_chrome_version": "125",
-  "permissions": ["debugger", "tabs", "tabGroups", "storage", "alarms", "scripting"],
+  "permissions": ["debugger", "tabs", "tabGroups", "storage", "alarms", "scripting", "nativeMessaging"],
   "background": {
     "service_worker": "sw.js",
     "type": "module"

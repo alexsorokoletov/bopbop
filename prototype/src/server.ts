@@ -14,6 +14,7 @@ import { launchChromium, connectCDP } from './cdp/browser.ts';
 import { Controller, makeDeny, isDetached } from './controller.ts';
 import { listenRelay, listenRelayAuto, SLOTS, DEFAULT_PORT, type RelayServer } from './relay.ts';
 import { GROUP_COLORS } from './label.ts';
+import { setupNativePairing } from './native-host.ts';
 import { ControllerSource } from './session.ts';
 import type { CDPBrowser } from './cdp/browser.ts';
 
@@ -384,6 +385,13 @@ export function buildServer(getController: () => Controller | Promise<Controller
 
 async function main() {
   const ext = (process.env.BBM_MODE || 'extension') === 'extension';
+  if (ext) {
+    try {
+      setupNativePairing((m) => process.stderr.write(m + '\n'));
+    } catch (e: any) {
+      process.stderr.write(`[bbm] native pairing host not installed (paste the token instead): ${e.message}\n`);
+    }
+  }
   const source = new ControllerSource(createBrowser, {
     allow: process.env.BBM_ALLOW ? process.env.BBM_ALLOW.split(',').map((s) => s.trim()) : null,
     deny: makeDeny(process.env.BBM_GUARD),

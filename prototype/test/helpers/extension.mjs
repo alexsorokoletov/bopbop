@@ -12,9 +12,10 @@ execFileSync(process.execPath, [fileURLToPath(new URL('../../scripts/build-exten
 
 export const FAKE_PM_DIR = fileURLToPath(new URL('./fake-pm', import.meta.url));
 
-export async function launchWithExtension({ token, port = 9333, headless = process.env.BBM_HEADLESS !== '0', extra = [] } = {}) {
+// token: null = paste no token (the extension pairs through the native host); userDataDir: a profile to keep.
+export async function launchWithExtension({ token, port = 9333, headless = process.env.BBM_HEADLESS !== '0', extra = [], userDataDir } = {}) {
   const dirs = [EXT_DIR, ...extra].join(',');
-  const chromium = await launchChromium({ headless, args: [`--load-extension=${dirs}`, `--disable-extensions-except=${dirs}`] });
+  const chromium = await launchChromium({ headless, userDataDir, args: [`--load-extension=${dirs}`, `--disable-extensions-except=${dirs}`] });
   const t0 = Date.now();
   let sw;
   while (!sw && Date.now() - t0 < 10000) {
@@ -29,16 +30,18 @@ export async function launchWithExtension({ token, port = 9333, headless = proce
     const r = await chromium.conn.send(
       'Runtime.evaluate',
       {
-        expression: `chrome.storage.local.set(${JSON.stringify({ token, port })}).then(() => chrome.storage.local.get('token')).then((v) => v.token)`,
+        expression: `chrome.storage.local.set(${JSON.stringify(token == null ? { port } : { token, port, tokenSource: 'manual' })}).then(() => chrome.storage.local.get('port')).then((v) => v.port)`,
         awaitPromise: true,
         returnByValue: true,
       },
       sessionId,
     );
-    if (r.result?.value === token) break;
+    if (r.result?.value === port) break;
     if (i > 400) throw new Error('could not write the pairing token: ' + JSON.stringify(r.exceptionDetails?.exception?.description || r.result));
     await new Promise((res) => setTimeout(res, 50));
   }
   chromium.extensionId = new URL(sw.url).host;
+  chromium.swEval = async (expression) =>
+    (await chromium.conn.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId)).result?.value;
   return chromium;
 }
