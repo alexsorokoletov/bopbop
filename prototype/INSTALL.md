@@ -59,9 +59,9 @@ This is the default mode. It lets the agent use your sign-ins and cookies.
    # Codex: codex mcp remove bbm && codex mcp add bbm --env BBM_MODE=extension -- bun "$PWD/src/server.ts"
    ```
 
-4. Start the agent and make one browser call. Pairing is automatic: on start, the server writes a pairing token to `~/.config/better-browser-mcp/relay-token` and installs a small native messaging host (`dev.bopbop.host`) for each installed Chromium browser (Chrome, Chromium, Brave, Edge, Vivaldi; macOS and Linux). Only the relay extension may call it, and it gives the extension the token. Within 30 seconds the extension pairs, with nothing to paste.
+4. Start the agent and make one browser call. Pairing is automatic: on start, the server writes a pairing token to `~/.config/better-browser-mcp/relay-token` and installs a small native messaging host (`dev.bopbop.host`) for each installed Chromium browser (Chrome, Chromium, Brave, Edge, and Vivaldi on macOS and Linux). On Windows, the server registers the host in the registry (`HKCU\Software\<browser>\NativeMessagingHosts`). Only the relay extension may call it, and it gives the extension the token. Within 30 seconds the extension pairs, with nothing to paste.
 
-If pairing does not happen (Windows, `BBM_RELAY_TOKEN` set, or `BBM_NATIVE_HOST=0`), paste the token by hand:
+If pairing does not happen (`BBM_RELAY_TOKEN` set, or `BBM_NATIVE_HOST=0`), paste the token by hand:
 
 5. Copy the token: `pbcopy < ~/.config/better-browser-mcp/relay-token`.
 6. Open the extension options (on `chrome://extensions`, click **Details**, then **Extension options**). Paste the token. Keep port `9333`. Click **Save**.

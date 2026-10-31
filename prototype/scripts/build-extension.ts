@@ -19,7 +19,10 @@ mkdirSync(out, { recursive: true });
 for (const f of ['manifest.json', 'options.html', 'icons']) cpSync(join(src, f), join(out, f), { recursive: true });
 // tsrs (the Rust port of the TypeScript 7 compiler) in its WebAssembly build: the native launcher picks its binary by
 // process.arch, and there is no darwin-x64 binary for a Node under Rosetta. The wasm build runs on any arch.
-execFileSync(join(root, 'node_modules', '.bin', 'tsrs-wasm'), ['-p', src, '--noEmit', 'false', '--outDir', out], { stdio: 'inherit' });
+// Its JS entry through our runtime: Windows cannot execute the node_modules/.bin shim directly.
+execFileSync(process.execPath, [join(root, 'node_modules', '@tsrs', 'wasm', 'bin', 'tsrs-wasm.js'), '-p', src, '--noEmit', 'false', '--outDir', out], {
+  stdio: 'inherit',
+});
 // Keep the release version stable, but identify every build in Chrome's displayed version.
 // Hash the emitted files (including local edits), not just the last Git commit.
 const hash = createHash('sha256');

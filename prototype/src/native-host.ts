@@ -3,7 +3,10 @@
 // when the server's proof does not match (the token changed). The token still never crosses the WebSocket.
 //
 // Files: the host script and its launcher go to ~/.config/better-browser-mcp/ (not the npx cache, which can be
-// cleared); one manifest per installed Chromium browser goes to that browser's per-user NativeMessagingHosts folder.
+// cleared). macOS and Linux: one manifest per installed Chromium browser goes to that browser's per-user
+// NativeMessagingHosts folder. Windows: one manifest next to the launcher, and a per-user registry key per browser
+// (HKCU\Software\<browser>\NativeMessagingHosts\<name>) whose default value is the manifest path.
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -15,10 +18,13 @@ export const HOST_NAME = 'dev.bopbop.host';
 /** The relay extension in the Chrome Web Store. */
 export const WEB_STORE_ID = 'emlckjhnbjogdooccahhbkhciflhobpp';
 
-/** The ID Chrome gives an unpacked extension: SHA-256 of its real folder path, first 32 hex digits as a-p. */
-export function extensionIdForPath(dir: string): string {
+/** The ID Chrome gives an unpacked extension: SHA-256 of its real folder path, first 32 hex digits as a-p.
+ *  On Windows Chrome hashes the UTF-16 path, with the drive letter in upper case. */
+export function extensionIdForPath(dir: string, platform = process.platform): string {
   const path = existsSync(dir) ? realpathSync(dir) : dir;
-  const hex = createHash('sha256').update(path).digest('hex').slice(0, 32);
+  const upperDrive = path.replace(/^[a-z]:/, (d) => d.toUpperCase());
+  const bytes = platform === 'win32' ? Buffer.from(upperDrive, 'utf16le') : Buffer.from(path);
+  const hex = createHash('sha256').update(bytes).digest('hex').slice(0, 32);
   return hex.replace(/[0-9a-f]/g, (c) => String.fromCharCode(97 + parseInt(c, 16)));
 }
 
@@ -36,8 +42,42 @@ const BROWSERS: Record<string, string[]> = {
   ],
   // Relative to the config root: CHROME_CONFIG_HOME, else XDG_CONFIG_HOME, else ~/.config.
   linux: ['google-chrome', 'google-chrome-beta', 'google-chrome-unstable', 'chromium', 'BraveSoftware/Brave-Browser', 'microsoft-edge', 'vivaldi'],
-  // Windows registers hosts in the registry: not supported yet (paste the token on the options page).
 };
+
+// Windows: profile folder under %LOCALAPPDATA% -> the browser's registry key. All Chrome channels read Google\Chrome.
+const WIN_BROWSERS: [string, string][] = [
+  ['Google/Chrome/User Data', 'Google\\Chrome'],
+  ['Google/Chrome Beta/User Data', 'Google\\Chrome'],
+  ['Google/Chrome Dev/User Data', 'Google\\Chrome'],
+  ['Google/Chrome SxS/User Data', 'Google\\Chrome'],
+  ['Chromium/User Data', 'Chromium'],
+  ['BraveSoftware/Brave-Browser/User Data', 'BraveSoftware\\Brave-Browser'],
+  ['Microsoft/Edge/User Data', 'Microsoft\\Edge'],
+];
+
+/** Windows: the HKCU registry keys to register the host under, for the installed browsers. */
+export function browserRegistryKeys({
+  platform = process.platform,
+  env = process.env,
+}: { platform?: string; env?: Record<string, string | undefined> } = {}): string[] {
+  if (platform !== 'win32' || !env.LOCALAPPDATA) return [];
+  const keys = WIN_BROWSERS.filter(([dir]) => existsSync(join(env.LOCALAPPDATA!, dir))).map(
+    ([, key]) => `HKCU\\Software\\${key}\\NativeMessagingHosts\\${HOST_NAME}`,
+  );
+  return [...new Set(keys)];
+}
+
+/** Set the default value of a registry key. True when it changed. */
+function regSet(key: string, value: string): boolean {
+  try {
+    const now = execFileSync('reg', ['query', key, '/ve'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    if (now.trimEnd().endsWith(value)) return false;
+  } catch {
+    /* no key yet */
+  }
+  execFileSync('reg', ['add', key, '/ve', '/t', 'REG_SZ', '/d', value, '/f'], { stdio: 'ignore' });
+  return true;
+}
 
 /** NativeMessagingHosts folders of the installed browsers (the profile folder exists). Creates nothing. */
 export function browserHostDirs({
@@ -94,6 +134,8 @@ function writeIfChanged(file: string, content: string, mode?: number): boolean {
 export interface InstallOptions {
   /** NativeMessagingHosts folders to write the manifest into (default: the installed browsers). */
   dirs?: string[];
+  /** Windows registry keys to point at the manifest (default: the installed browsers). */
+  regKeys?: string[];
   /** Extension IDs allowed to call the host. */
   ids: string[];
   tokenFile: string;
@@ -101,15 +143,31 @@ export interface InstallOptions {
   binDir: string;
   /** The JavaScript runtime that runs the host (Chrome starts it with a minimal PATH, so an absolute path). */
   runtime?: string;
+  /** Selects the launcher: a .bat on Windows, a shell script elsewhere. */
+  platform?: string;
+  /** Sets a registry key's default value; true when it changed. */
+  reg?: (key: string, value: string) => boolean;
 }
 
-/** Install or update the host. Returns the manifests it wrote (unchanged ones are not rewritten). */
-export function installNativeHost({ dirs = browserHostDirs(), ids, tokenFile, binDir, runtime = process.execPath }: InstallOptions) {
+/** Install or update the host. Returns the manifests and registry keys it wrote (unchanged ones are not rewritten). */
+export function installNativeHost({
+  dirs = browserHostDirs(),
+  regKeys = browserRegistryKeys(),
+  ids,
+  tokenFile,
+  binDir,
+  runtime = process.execPath,
+  platform = process.platform,
+  reg = regSet,
+}: InstallOptions) {
   mkdirSync(binDir, { recursive: true, mode: 0o700 });
   const script = join(binDir, 'native-host.mjs');
-  const launcher = join(binDir, 'native-host');
   writeIfChanged(script, hostScript(tokenFile));
-  writeIfChanged(launcher, `#!/bin/sh\nexec ${shellQuote(runtime)} ${shellQuote(script)} "$@"\n`, 0o755);
+  const launcher = join(binDir, platform === 'win32' ? 'native-host.bat' : 'native-host');
+  // cmd reads a .bat in the legacy code page: switch to UTF-8 (output to nul, stdout is the native-messaging channel)
+  // and find the script next to the launcher (%~dp0), so a non-ASCII user folder works.
+  if (platform === 'win32') writeIfChanged(launcher, `@echo off\r\nchcp 65001 >nul\r\n"${runtime}" "%~dp0native-host.mjs" %*\r\n`);
+  else writeIfChanged(launcher, `#!/bin/sh\nexec ${shellQuote(runtime)} ${shellQuote(script)} "$@"\n`, 0o755);
   const manifest =
     JSON.stringify(
       {
@@ -127,6 +185,11 @@ export function installNativeHost({ dirs = browserHostDirs(), ids, tokenFile, bi
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${HOST_NAME}.json`);
     if (writeIfChanged(file, manifest)) written.push(file);
+  }
+  if (regKeys.length) {
+    const file = join(binDir, `${HOST_NAME}.json`);
+    if (writeIfChanged(file, manifest)) written.push(file);
+    for (const key of regKeys) if (reg(key, file)) written.push(key);
   }
   return { written, launcher };
 }
