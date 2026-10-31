@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // better-browser-mcp: token-lean browser control over MCP (stdio).
-// Modes (BBM_MODE): extension (default, relay, BBM_RELAY_PORT), launch (fresh Chromium), connect (BBM_CDP_URL).
+// Modes (BBM_MODE): extension (default, relay, BBM_RELAY_PORT), connect (BBM_CDP_URL).
+// launch (a fresh, headless Chromium: BBM_HEADLESS, BBM_CHROME, BBM_CHROME_ARGS) is internal, for tests and the
+// benchmark only, and is not in the user docs.
 
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
