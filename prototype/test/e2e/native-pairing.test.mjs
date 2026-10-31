@@ -1,7 +1,8 @@
 // Zero-paste pairing: with the native host installed, a fresh extension pairs without a pasted token,
 // and picks up a new token when the server's proof stops matching.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,14 +12,35 @@ import { extensionIdForPath, installNativeHost } from '../../src/native-host.ts'
 import { EXT_DIR, launchWithExtension } from '../helpers/extension.mjs';
 
 const PORT = 9412;
+// Chrome looks for per-user hosts in <user data dir>/NativeMessagingHosts; on Windows only in the registry
+// (the test Chromium reads the Chromium key).
+const REG_KEY = 'HKCU\\Software\\Chromium\\NativeMessagingHosts\\dev.bopbop.host';
+const where = (profile) => (process.platform === 'win32' ? { dirs: [], regKeys: [REG_KEY] } : { dirs: [join(profile, 'NativeMessagingHosts')], regKeys: [] });
+
+// Windows: put back the user's own registration (or none) when the tests end.
+if (process.platform === 'win32') {
+  const reg = (...args) => execFileSync('reg', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  let saved = null;
+  try {
+    saved =
+      reg('query', REG_KEY, '/ve')
+        .match(/REG_SZ\s+(.+)/)?.[1]
+        .trim() ?? null;
+  } catch {
+    /* none */
+  }
+  after(() => {
+    if (saved) reg('add', REG_KEY, '/ve', '/t', 'REG_SZ', '/d', saved, '/f');
+    else reg('delete', REG_KEY, '/f');
+  });
+}
 const tok = () => randomBytes(24).toString('hex');
 
 test('a fresh profile pairs through the native host, and follows a token change', async () => {
   const home = mkdtempSync(join(tmpdir(), 'bbm-np-'));
   const profile = join(home, 'profile');
   const tokenFile = join(home, 'relay-token');
-  // Chrome looks for per-user hosts in <user data dir>/NativeMessagingHosts.
-  installNativeHost({ dirs: [join(profile, 'NativeMessagingHosts')], ids: [extensionIdForPath(EXT_DIR)], tokenFile, binDir: join(home, 'bin') });
+  installNativeHost({ ...where(profile), ids: [extensionIdForPath(EXT_DIR)], tokenFile, binDir: join(home, 'bin') });
 
   const first = tok();
   writeFileSync(tokenFile, first);
@@ -43,7 +65,7 @@ test('a token pasted by hand is never replaced by the native host', async () => 
   const home = mkdtempSync(join(tmpdir(), 'bbm-np-'));
   const profile = join(home, 'profile');
   const tokenFile = join(home, 'relay-token');
-  installNativeHost({ dirs: [join(profile, 'NativeMessagingHosts')], ids: [extensionIdForPath(EXT_DIR)], tokenFile, binDir: join(home, 'bin') });
+  installNativeHost({ ...where(profile), ids: [extensionIdForPath(EXT_DIR)], tokenFile, binDir: join(home, 'bin') });
   const fileToken = tok();
   writeFileSync(tokenFile, fileToken);
   const chromium = await launchWithExtension({ token: null, port: PORT + 5, userDataDir: profile });

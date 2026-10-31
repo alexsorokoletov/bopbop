@@ -98,8 +98,10 @@ export class CDPBrowser {
 
 function findChromium() {
   if (process.env.BBM_CHROME) return process.env.BBM_CHROME;
-  // Playwright's Chromium: macOS and Linux caches, old and new folder names.
-  for (const pw of [join(homedir(), 'Library/Caches/ms-playwright'), join(homedir(), '.cache/ms-playwright')]) {
+  // Playwright's Chromium: macOS, Linux and Windows caches, old and new folder names.
+  const caches = [join(homedir(), 'Library/Caches/ms-playwright'), join(homedir(), '.cache/ms-playwright')];
+  if (process.env.LOCALAPPDATA) caches.push(join(process.env.LOCALAPPDATA, 'ms-playwright'));
+  for (const pw of caches) {
     if (!existsSync(pw)) continue;
     const dirs = readdirSync(pw)
       .filter((d) => /^chromium-\d+$/.test(d))
@@ -111,6 +113,8 @@ function findChromium() {
         'chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium',
         'chrome-linux64/chrome',
         'chrome-linux/chrome',
+        'chrome-win64/chrome.exe',
+        'chrome-win/chrome.exe',
       ]) {
         if (existsSync(join(pw, d, rel))) return join(pw, d, rel);
       }
