@@ -1,4 +1,4 @@
-// Tab group names: "Agent:<code>". The code is 1-5 letters, digits or emoji (an emoji counts as one), short enough
+// Tab group names and colors: "Agent:<code>". The code is 1-5 letters, digits or emoji (an emoji counts as one), short enough
 // for a tab group chip and different per session. Default: the project's initials + the session's slot number.
 import { basename } from 'node:path';
 
@@ -37,4 +37,15 @@ function abbreviate(words: string[]): string {
       .slice(0, words[0].length > 3 ? 3 : 2)
       .join('');
   return 'BB'; // no usable name
+}
+
+/** Chrome's tab group colors (chrome.tabGroups.Color). Agent groups are purple unless the agent picks one. */
+export const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'] as const;
+export type GroupColor = (typeof GROUP_COLORS)[number];
+
+/** The color, trimmed and lower-cased; throws unless it is one of GROUP_COLORS. */
+export function checkColor(color: string): GroupColor {
+  const c = color.trim().toLowerCase();
+  if (!(GROUP_COLORS as readonly string[]).includes(c)) throw new Error(`color must be one of ${GROUP_COLORS.join(', ')}`);
+  return c as GroupColor;
 }

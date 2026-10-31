@@ -61,3 +61,26 @@ test('a startup transport failure does not claim the group was renamed', async (
   await c.init();
   assert.equal(c.takeNotice(), 'could not name the tab group: connection closed');
 });
+
+test('an extension that cannot color groups gives update instructions and keeps the old color', async () => {
+  let applied = ''; // the group title in Chrome
+  const c = controller(async (method, params) => {
+    if (method === 'Bbm.setLabel') applied = params.label; // an older extension: applies the name, no `color` in the reply
+    return { groupsUpdated: 1 };
+  });
+  await c.init();
+  assert.equal(await c.setLabel('OLD'), 'tab group: Agent:OLD'); // purple works on any extension
+  await assert.rejects(c.setLabel('NEW', 'green'), /extension is outdated.*color/s);
+  assert.equal(applied, 'OLD');
+  assert.equal(c.label, 'OLD');
+  assert.equal(c.color, 'purple');
+});
+
+test('a color the extension applied is reported and kept for a reconnect', async () => {
+  const c = controller(async (method, params) => ({ groupsUpdated: 1, color: params?.color }));
+  const saved = [];
+  c.onLabel = (label, color) => saved.push([label, color]);
+  await c.init();
+  assert.equal(await c.setLabel('GW44', 'green'), 'tab group: Agent:GW44 (green)');
+  assert.deepEqual(saved, [['GW44', 'green']]);
+});

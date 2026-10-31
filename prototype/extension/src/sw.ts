@@ -26,6 +26,8 @@ async function hmac(token: string, msg: string) {
   return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg)));
 }
 
+type GroupColor = `${chrome.tabGroups.Color}`; // 'purple', 'green', ...
+
 class Session {
   slot: number;
   ws: WebSocket | null;
@@ -37,6 +39,7 @@ class Session {
   agentWindowId: number | null;
   keepTabs: boolean;
   label: string;
+  color: GroupColor;
   lastAgentInput: number;
   touched: Set<number>;
   groupByWindow: Map<number, number>;
@@ -58,6 +61,7 @@ class Session {
     this.touched = new Set(); // agent tabs the user activated: kept (ungrouped) at session end
     this.groupByWindow = new Map(); // windowId -> groupId (one group per window: grouping moves tabs)
     this.label = ''; // Bbm.setLabel: group title "Agent:<label>" instead of "Agent N"
+    this.color = 'purple'; // Bbm.setLabel: the agent's group color
   }
 
   get title() {
@@ -98,10 +102,10 @@ class Session {
           this.groupByWindow.delete(windowId);
         }
       }
-      // After a service-worker restart we forget our groups: join this window's group with our title (purple,
-      // not another live session's) instead of making a second "Agent:CT2".
+      // After a service-worker restart we forget our groups: join this window's group with our title and color
+      // (not another live session's) instead of making a second "Agent:CT2".
       const live = new Set(sessions.flatMap((x) => [...x.groupByWindow.values()]));
-      const same = (await chrome.tabGroups.query({ windowId, color: 'purple', title: this.title })).find((g) => !live.has(g.id));
+      const same = (await chrome.tabGroups.query({ windowId, color: this.color, title: this.title })).find((g) => !live.has(g.id));
       if (same) {
         await chrome.tabs.group({ groupId: same.id, tabIds: [tabId] });
         this.groupByWindow.set(windowId, same.id);
@@ -109,7 +113,8 @@ class Session {
       }
       const groupId = await chrome.tabs.group({ tabIds: [tabId], createProperties: { windowId } });
       this.groupByWindow.set(windowId, groupId);
-      await chrome.tabGroups.update(groupId, { title: this.title, color: 'purple' });
+      await chrome.tabGroups.update(groupId, { title: this.title, color: this.color });
+      await rememberColored(this.title, this.color);
     } catch {
       /* groups unsupported (e.g. headless): ignore */
     }
@@ -155,18 +160,20 @@ class Session {
         this.keepTabs = !!params.keepTabs;
         return {};
       case 'Bbm.setLabel': {
-        const previous = this.label;
+        const [previous, previousColor] = [this.label, this.color];
         this.label = String(params.label || '').slice(0, 40); // checked by the server (1-5 graphemes)
+        this.color = params.color || 'purple'; // checked by the server (one of Chrome's colors)
         try {
           for (const groupId of this.groupByWindow.values()) {
-            const group = await chrome.tabGroups.update(groupId, { title: this.title });
+            const group = await chrome.tabGroups.update(groupId, { title: this.title, color: this.color });
             if (group?.title !== this.title) throw new Error('Chrome did not apply the tab group title');
           }
+          if (this.groupByWindow.size) await rememberColored(this.title, this.color);
         } catch (e) {
-          this.label = previous;
+          [this.label, this.color] = [previous, previousColor];
           throw e;
         }
-        return { groupsUpdated: this.groupByWindow.size };
+        return { groupsUpdated: this.groupByWindow.size, color: this.color };
       }
       case 'Bbm.clearForeignFrames':
         await clearForeignFrames(this.own(params.targetId));
@@ -327,6 +334,7 @@ class Session {
     this.groupByWindow.clear();
     this.agentWindowId = null;
     this.label = '';
+    this.color = 'purple';
     for (const id of ids) {
       owner.delete(id);
       const tab = await chrome.tabs.get(id).catch(() => null);
@@ -420,27 +428,41 @@ async function connectAll() {
 
 // ---- cleanup: agent groups no live session owns (left by a Chrome or service worker restart, or BBM_KEEP_TABS)
 // are closed once no tab in them was used for cleanupDays (options page; default 7, 0 = off). Closing a group's
-// last tab removes the group. Only purple groups with an agent title are candidates: never the user's groups.
+// last tab removes the group. Only groups with an agent title are candidates, and only purple ones or ones an
+// agent colored (title + color remembered in storage, one key per pair so sessions never overwrite each other):
+// never the user's groups.
 const AGENT_TITLE = /^Agent( \d+)?(:\S{1,40})?$/u; // Agent, Agent 2, Agent:CT2, Agent:🧪
 const DAY = 864e5;
+const coloredKey = (title: string | undefined, color: string) => `colored:${title}|${color}`;
+
+async function rememberColored(title: string, color: GroupColor) {
+  if (color !== 'purple') await chrome.storage.local.set({ [coloredKey(title, color)]: 1 });
+}
+
 async function bbmCleanup({ now = Date.now() } = {}) {
   const { cleanupDays = 7 } = await chrome.storage.local.get<{ cleanupDays?: number }>('cleanupDays');
   if (!(cleanupDays > 0)) return 0;
   const live = new Set(sessions.flatMap((s) => [...s.groupByWindow.values()]));
+  const colored = new Set(Object.keys(await chrome.storage.local.get(null)).filter((k) => k.startsWith('colored:')));
   const stale: number[] = [];
-  for (const g of await chrome.tabGroups.query({ color: 'purple' })) {
-    if (live.has(g.id) || !AGENT_TITLE.test(g.title || '')) continue;
+  for (const g of await chrome.tabGroups.query({})) {
+    if (live.has(g.id) || !AGENT_TITLE.test(g.title || '') || (g.color !== 'purple' && !colored.has(coloredKey(g.title, g.color)))) continue;
     const tabs = await chrome.tabs.query({ groupId: g.id });
     // lastAccessed is missing on very old Chrome: keep the group then.
     if (tabs.every((t) => t.lastAccessed && now - t.lastAccessed > cleanupDays * DAY)) stale.push(...tabs.map((t) => t.id!));
   }
   if (stale.length) await chrome.tabs.remove(stale).catch(() => {});
+  // Forget the pairs no group has any more (closed here or by the user); keep those another group still uses.
+  const left = new Set((await chrome.tabGroups.query({})).map((g) => coloredKey(g.title, g.color)));
+  const gone = [...colored].filter((k) => !left.has(k));
+  if (gone.length) await chrome.storage.local.remove(gone);
   return stale.length;
 }
-// Test hooks: bbmCleanup with a future `now`; bbmBackoff to shorten the waits; bbmAttempts = connect times per slot.
+// Test hooks: bbmCleanup with a future `now`; bbmRemember = rememberColored; bbmBackoff to shorten the waits; bbmAttempts = connect times per slot.
 // bbmDisconnect drops every server link, as an extension reload or a Chrome restart would; bbmSweep starts/stops a sweep.
 Object.assign(globalThis, {
   bbmCleanup,
+  bbmRemember: rememberColored,
   bbmBackoff: backoff,
   bbmAttempts: () => sessions.map((s) => s.attemptTimes),
   bbmDisconnect: () => {

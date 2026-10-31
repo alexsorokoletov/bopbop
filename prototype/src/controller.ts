@@ -8,7 +8,7 @@ import { Tab, type Allow, type Deny, type Snapshot, type SnapshotOpts, type Wait
 import type { CDPBrowser, TargetInfo } from './cdp/browser.ts';
 import type { Json } from './cdp/connection.ts';
 import { diffLines } from './format.ts';
-import { checkLabel, defaultLabel } from './label.ts';
+import { checkColor, checkLabel, defaultLabel, type GroupColor } from './label.ts';
 import { DEFAULT_PORT, SLOTS } from './relay.ts';
 import { DEVICES, NETWORKS } from './emulation.ts';
 import { showCookies, redact, redactHeader, kb, durMs, phases } from './network.ts';
@@ -135,7 +135,12 @@ export interface ControllerOptions {
    *  (BBM_LABEL, or the agent's label kept across a reconnect). */
   project?: string;
   label?: string;
+  /** The agent's tab group color, kept across a reconnect. Default purple. */
+  color?: GroupColor;
 }
+
+const OUTDATED_EXTENSION =
+  'the connected browser extension is outdated; run npm run build:extension from prototype/, then reload the relay extension at chrome://extensions (load prototype/dist/extension if using an older copy)';
 
 /** Files the agent saves (HAR) go into one folder, by name only: a model cannot pick a path. */
 function outputPath(name: string | undefined, ext: string) {
@@ -193,13 +198,17 @@ export class Controller {
   allow: Allow;
   popups: { sid: string; opener: string | undefined }[];
 
-  constructor(browser: CDPBrowser, { allow = null, deny = null, front = true, window = null, keepTabs = false, project, label }: ControllerOptions = {}) {
+  constructor(
+    browser: CDPBrowser,
+    { allow = null, deny = null, front = true, window = null, keepTabs = false, project, label, color = 'purple' }: ControllerOptions = {},
+  ) {
     this.browser = browser;
     // The relay port's slot (9333 = 0); a pinned port outside the slots uses its last two digits.
     const fromBase = (browser.port ?? DEFAULT_PORT) - DEFAULT_PORT;
     const slot = fromBase >= 0 && fromBase < SLOTS ? fromBase : Math.max(0, ((browser.port ?? 0) % 100) - 1);
     this.defaultLabel = defaultLabel(project || process.cwd(), slot);
     this.label = label ? checkLabel(label) : '';
+    this.color = color;
     this.front = front; // false: never bring agent tabs to the front (side by side with a user)
     this.window = window; // 'agent': open agent tabs in their own unfocused window (extension mode)
     this.keepTabs = keepTabs; // extension mode: keep agent tabs open when the session ends
@@ -253,7 +262,8 @@ export class Controller {
 
   defaultLabel: string;
   label: string; // set by the agent (or BBM_LABEL); '' = defaultLabel
-  onLabel?: (label: string) => void; // ControllerSource keeps it for the next controller after a reconnect
+  color: GroupColor;
+  onLabel?: (label: string, color: GroupColor) => void; // ControllerSource keeps them for the next controller after a reconnect
 
   takeNotice() {
     const n = this.notice;
@@ -266,7 +276,7 @@ export class Controller {
     await this.browser.conn?.send('Bbm.configure', { keepTabs: this.keepTabs }).catch(() => {});
     if (this.browser.mode === 'extension') {
       try {
-        await this.#applyLabel(this.label || this.defaultLabel);
+        await this.#applyLabel(this.label || this.defaultLabel, this.color);
         // Ask once (with the first result) for a name that says what this session does.
         if (!this.label) {
           this.notice = `your tab group is Agent:${this.defaultLabel}; name it for your task: tabs action=label label=<1-5 letters, digits or emoji>`;
@@ -358,27 +368,36 @@ export class Controller {
     return sid;
   }
 
-  /** Extension mode: name this session's tab group "Agent:<label>" (1-5 letters, digits or emoji); '' restores the default. */
-  async setLabel(label = '') {
+  /** Extension mode: name this session's tab group "Agent:<label>" (1-5 letters, digits or emoji) and color it.
+   *  '' restores the default name; a color alone keeps the name, a name alone keeps the color. */
+  async setLabel(label?: string, color?: string) {
     if (this.browser.mode !== 'extension') throw new Error('labels work only in extension mode (BBM_MODE=extension)');
-    const next = label.trim() ? checkLabel(label) : '';
-    const result = await this.#applyLabel(next || this.defaultLabel);
+    let next = '';
+    if (label === undefined && color !== undefined) next = this.label;
+    else if (label?.trim()) next = checkLabel(label);
+    const nextColor = color === undefined ? this.color : checkColor(color);
+    const result = await this.#applyLabel(next || this.defaultLabel, nextColor);
+    // An extension older than group colors applies the name, ignores `color` and does not echo it back:
+    // put the old name back so Chrome and our state agree.
+    if (nextColor !== 'purple' && result.color !== nextColor) {
+      await this.#applyLabel(this.label || this.defaultLabel, this.color).catch(() => {});
+      throw new Error(`${OUTDATED_EXTENSION} (it cannot set the group color)`);
+    }
     this.label = next;
+    this.color = nextColor;
     this.notice = ''; // the agent named it: no reminder
-    this.onLabel?.(this.label);
-    if (result.groupsUpdated === 0) return `new tab groups will be named Agent:${this.label || this.defaultLabel}`;
-    return `tab group: Agent:${this.label || this.defaultLabel}`;
+    this.onLabel?.(this.label, this.color);
+    const name = `Agent:${this.label || this.defaultLabel}${this.color === 'purple' ? '' : ` (${this.color})`}`;
+    if (result.groupsUpdated === 0) return `new tab groups will be named ${name}`;
+    return `tab group: ${name}`;
   }
 
-  async #applyLabel(label: string) {
+  async #applyLabel(label: string, color: GroupColor) {
     try {
-      return await this.browser.conn.send('Bbm.setLabel', { label });
+      return await this.browser.conn.send('Bbm.setLabel', { label, color });
     } catch (e: any) {
       if (String(e.message).includes('Bbm.setLabel is not supported by the extension relay')) {
-        throw new Error(
-          'the connected browser extension is outdated and does not support tab group labels; run npm run build:extension from prototype/, then reload the relay extension at chrome://extensions (load prototype/dist/extension if using an older copy)',
-          { cause: e },
-        );
+        throw new Error(`${OUTDATED_EXTENSION} (it does not support tab group labels)`, { cause: e });
       }
       throw e;
     }
