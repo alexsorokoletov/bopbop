@@ -72,7 +72,7 @@ test('host folders: only browsers that are installed (their profile folder exist
     join(home, 'Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts'),
   ]);
   mkdirSync(join(home, '.config/chromium'), { recursive: true });
-  assert.deepEqual(browserHostDirs({ home, platform: 'linux' }), [join(home, '.config/chromium/NativeMessagingHosts')]);
+  assert.deepEqual(browserHostDirs({ home, platform: 'linux', env: {} }), [join(home, '.config/chromium/NativeMessagingHosts')]);
   assert.deepEqual(browserHostDirs({ home, platform: 'win32' }), []);
   assert.ok(!existsSync(join(home, 'Library/Application Support/Google/Chrome/NativeMessagingHosts')), 'listing creates nothing');
 });
