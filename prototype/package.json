@@ -1,6 +1,6 @@
 {
   "name": "bopbop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Give any AI agent your real Chrome: small text snapshots, its own tab group, few tokens. MCP server (formerly better-browser-mcp).",
   "keywords": [
     "agent",
