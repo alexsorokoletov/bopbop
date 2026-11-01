@@ -1,20 +1,19 @@
 name: Publish npm
 
 # Publishes the MCP server as `bopbop` from a commit that passed CI. No token: npm trusted publishing (OIDC).
+# The version is the one in prototype/package.json: bump it in a PR (npm version X --no-git-tag-version), merge,
+# then run this workflow. It refuses a version npm already has, and tags the commit vX.
 # One-time setup on npmjs.com: package bopbop → Settings → Trusted publisher → GitHub Actions,
 # repository alexsorokoletov/bopbop, workflow publish-npm.yml.
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version to publish (e.g. 0.1.1); must be higher than the last one on npm'
-        required: true
       tag:
         description: 'dist-tag'
         default: latest
 
 permissions:
-  contents: read
+  contents: write # the vX tag
   actions: read
   id-token: write # OIDC token for npm trusted publishing
 
@@ -35,8 +34,12 @@ jobs:
       - run: npm ci --ignore-scripts
       # prepublishOnly builds dist/npm; provenance is added automatically with trusted publishing.
       - name: Publish
-        env: { VERSION: '${{ inputs.version }}', TAG: '${{ inputs.tag }}' }
+        env: { TAG: '${{ inputs.tag }}', GH_TOKEN: '${{ github.token }}' }
         run: |
-          npm version --no-git-tag-version "$VERSION"
+          VERSION=$(node -p "require('./package.json').version")
+          if [ -n "$(npm view "bopbop@$VERSION" version 2>/dev/null)" ]; then
+            echo "::error::bopbop@$VERSION is already on npm: bump prototype/package.json in a PR first"; exit 1
+          fi
           npm publish --access public --tag "$TAG"
-          echo "Published bopbop@$VERSION ($TAG)" >> "$GITHUB_STEP_SUMMARY"
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$GITHUB_SHA" >/dev/null
+          echo "Published bopbop@$VERSION ($TAG), tagged v$VERSION" >> "$GITHUB_STEP_SUMMARY"
