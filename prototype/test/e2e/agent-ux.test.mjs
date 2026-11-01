@@ -2,6 +2,7 @@
 // (css=, scoped chains, ambiguity warning), screenshot area/scale, console dedupe, tab duplicate.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { startServer } from '../../../fixtures/server.mjs';
 import { launchChromium } from '../../src/cdp/browser.ts';
 import { Controller } from '../../src/controller.ts';
@@ -57,6 +58,14 @@ test('navigate snapshot=none gives one line; interactive leaves out text', async
   assert.doesNotMatch(inter, /Table card/);
 });
 
+test('act snapshot=interactive returns only actionable elements, like navigate', async () => {
+  await c.navigate(page);
+  const r = await c.act([{ click: 'css=#series-ald' }], { snapshot: 'interactive' });
+  assert.doesNotMatch(r.text, /diff \(/);
+  assert.match(r.text, /checkbox "BRK"/); // unchanged, so a whole snapshot
+  assert.doesNotMatch(r.text, /Table card/);
+});
+
 test('scroll until brings the text into view inside the app <main>', async () => {
   await c.navigate(page);
   const r = await c.act([{ scroll: 'page', until: 'Deep target' }], { snapshot: 'none' });
@@ -87,6 +96,67 @@ test('an ambiguous text= locator warns and names what it used', async () => {
   await c.navigate(page);
   const r = await c.act([{ hover: 'text=ALD' }], { snapshot: 'none' });
   assert.match(r.text, /⚠ text=ALD matched 2 elements, used .* \[e\d+\]; narrow it: "css=… >> text=ALD"/);
+});
+
+test('role= locator: role plus accessible name, an exact name before a partial one', async () => {
+  await c.navigate(page);
+  const status = () => js('document.getElementById("status").textContent');
+  const r = await c.act([{ click: 'role=tab[name=Releases]' }], { snapshot: 'none' });
+  assert.doesNotMatch(r.text, /⚠/);
+  assert.equal(await status(), 'tab Releases');
+  await c.act([{ click: 'role=tab[name="archive"]' }], { snapshot: 'none' });
+  assert.equal(await status(), 'tab Releases archive');
+  await c.act([{ click: 'css=#nope, css=#tabs >> role=tab[name=overview]' }], { snapshot: 'none' });
+  assert.equal(await status(), 'tab Overview');
+  assert.match((await c.act([{ hover: 'role=tab' }], { snapshot: 'none' })).text, /⚠ role=tab matched 3 elements/);
+  await assert.rejects(c.text({ ref: 'role=tab[name=Nope]' }), /no visible element for role=tab\[name=Nope\]/);
+  await assert.rejects(c.text({ ref: 'role=tab[nam=x]' }), /bad locator/);
+});
+
+test('read shows the aria-label of an image, meter or progress bar that has no text (a star rating)', async () => {
+  await c.navigate(page);
+  assert.match(await c.text({}), /Rated 3\.7 stars out of five stars 441 reviews/);
+  assert.match(await c.text({ format: 'markdown' }), /!\[Rated 3\.7 stars out of five stars\] 441 reviews/);
+  assert.doesNotMatch(await c.text({}), /Share/); // an icon button is a control, not content
+});
+
+// Make the page's own snapshot call fail with `message` (the next attach gets a fresh Tab, without this patch).
+async function failSnapshot(message) {
+  const tab = await c.tab();
+  const call = tab.call;
+  tab.call = (fid, fn, args) => (fn === 'snapshot' && fid === tab.mainId ? Promise.reject(new Error(message)) : call.call(tab, fid, fn, args));
+  return () => (tab.call = call);
+}
+
+test('navigate fails with the reason when the page itself cannot be read, not with an "undefined" URL', async () => {
+  await c.navigate(page);
+  const restore = await failSnapshot('page went away');
+  try {
+    await assert.rejects(c.navigate(page), /page went away/);
+  } finally {
+    restore();
+  }
+});
+
+test('navigate re-attaches when a frame of another extension blocks the page, and returns its URL', async () => {
+  await c.navigate(page);
+  await failSnapshot('Cannot access a chrome-extension:// URL of different extension');
+  assert.match(await c.navigate(page), /^\[t\d+\] http:\/\/\S+\/agent-ux\/ "Agent UX"/);
+});
+
+test('a download reports the saved path and size; a second one gets its own name', async () => {
+  await c.navigate(page);
+  const first = (await c.act([{ click: 'text=Export CSV' }], { snapshot: 'none' })).text;
+  const m = /download saved (.+?) \((\d+) bytes\)/.exec(first);
+  assert.ok(m, first);
+  assert.match(m[1], /report\.csv$/);
+  assert.equal(readFileSync(m[1], 'utf8'), 'name,score\nALD,3.7\n');
+  assert.equal(+m[2], 19);
+  const second = (await c.act([{ click: 'text=Export CSV' }], { snapshot: 'none' })).text;
+  const m2 = /download saved (.+?) \(19 bytes\)/.exec(second);
+  assert.ok(m2, second);
+  assert.notEqual(m2[1], m[1]);
+  assert.doesNotMatch(second, /switched to new tab/);
 });
 
 test('locators work in ref options of other tools', async () => {

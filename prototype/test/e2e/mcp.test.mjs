@@ -85,6 +85,8 @@ test('login via MCP tools', async () => {
   assert.match(await call('eval', { expression: 'document.title' }), /Acme/);
   const shot = await client.callTool({ name: 'screenshot', arguments: {} });
   assert.equal(shot.content[0].type, 'image');
+  // how to turn image px into click_xy, with this shot's numbers
+  assert.match(shot.content[1].text, /click_xy = \[0 \+ imageX \/ [\d.]+, 0 \+ imageY \/ [\d.]+\]/);
 });
 
 test('errors are tool errors, not crashes', async () => {

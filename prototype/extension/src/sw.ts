@@ -391,6 +391,28 @@ chrome.tabs.onCreated.addListener((tab) => {
   if (!s || Date.now() - s.lastAgentInput > 3000) return;
   void s.addToGroup(tab.id!).then(() => s.adopt(tab));
 });
+// A download that starts right after an agent's input is that agent's: its server gets the saved path and size.
+const downloadOwner = new Map<number, Session>(); // download id -> session
+const downloadInfo = (d: chrome.downloads.DownloadItem) => ({
+  id: String(d.id),
+  url: d.finalUrl || d.url,
+  path: d.filename || undefined,
+  bytes: d.fileSize >= 0 ? d.fileSize : undefined,
+  state: d.state === 'in_progress' ? 'in progress' : d.state,
+  error: d.error,
+});
+chrome.downloads.onCreated.addListener((d) => {
+  const s = sessions.filter((x) => Date.now() - x.lastAgentInput < 3000).sort((a, b) => b.lastAgentInput - a.lastAgentInput)[0];
+  if (!s) return;
+  downloadOwner.set(d.id, s);
+  s.send({ method: 'Bbm.download', params: downloadInfo(d) });
+});
+chrome.downloads.onChanged.addListener((delta) => {
+  const s = downloadOwner.get(delta.id);
+  if (!s || !(delta.state || delta.filename)) return;
+  if (delta.state && delta.state.current !== 'in_progress') downloadOwner.delete(delta.id);
+  void chrome.downloads.search({ id: delta.id }).then(([d]) => d && s.send({ method: 'Bbm.download', params: downloadInfo(d) }));
+});
 chrome.tabs.onUpdated.addListener((tabId, _info, tab) => {
   const s = owner.get(tabId);
   if (s?.discover) s.send({ method: 'Target.targetInfoChanged', params: { targetInfo: s.targetInfo(tab) } });

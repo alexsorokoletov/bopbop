@@ -592,6 +592,32 @@
     return { el: best, count };
   }
 
+  // "role=tab[name=Releases]": visible elements with that role whose accessible name equals the name (ignoring case),
+  // else contains it; "role=tab" alone matches every tab. Quotes around the name are optional.
+  function findRole(spec, root = document.body || document) {
+    const m = /^([a-z]+)(?:\[name=(["']?)(.*)\2\])?$/.exec(spec.trim());
+    if (!m) throw new Error(`bad locator "role=${spec}" (use role=tab or role=tab[name=Releases])`);
+    const [, want, , rawName] = m;
+    const name = rawName === undefined ? null : rawName.toLowerCase();
+    const exact = [],
+      partial = [];
+    const walk = (node) => {
+      if (node.nodeType === 1) {
+        if (SKIP_TAGS.has(node.localName) || !isVisible(node)) return;
+        const r = role(node);
+        if (r === want) {
+          const n = (accName(node, r) || '').toLowerCase();
+          if (name === null || n === name) exact.push(node);
+          else if (n.includes(name)) partial.push(node);
+        }
+      }
+      if (node.nodeType === 1 || node.nodeType === 11 || node.nodeType === 9) for (const c of children(node)) walk(c);
+    };
+    walk(root);
+    const all = exact.length ? exact : partial;
+    return { el: all[0] || null, count: all.length };
+  }
+
   function refOfEl(node, prefix) {
     const n = refFor(node);
     let r = role(node);
@@ -601,7 +627,7 @@
     return { ref: `${prefix}e${n}`, desc: `${r || node.localName}${name ? ' ' + JSON.stringify(name.slice(0, 40)) : ''}` };
   }
 
-  // Locator chain, e.g. "text=ALD", "css=.tiles", "e12 >> text=ALD", "css=#card >> text=Total".
+  // Locator chain, e.g. "text=ALD", "css=.tiles", "role=tab[name=Releases]", "e12 >> text=ALD", "css=#card >> text=Total".
   // Each part searches inside the element the previous part found. Returns the ref of the last match,
   // how many elements matched it, and a short description; null when nothing matches in this frame.
   function locate(spec, prefix = '') {
@@ -622,7 +648,9 @@
         count = all.length;
       } else if (part.startsWith('text=')) {
         ({ el: found, count } = findText(part.slice(5).replace(/^["']|["']$/g, ''), scope));
-      } else throw new Error(`bad locator part "${part}" (use a ref, css=…, or text=…)`);
+      } else if (part.startsWith('role=')) {
+        ({ el: found, count } = findRole(part.slice(5), scope));
+      } else throw new Error(`bad locator part "${part}" (use a ref, css=…, text=… or role=…)`);
       if (!found) return null;
       scope = found;
     }
@@ -763,6 +791,12 @@
   }
 
   // ---- text extraction ----
+  // An image, meter or progress bar with no text of its own (a star rating, a score ring): its aria-label is the content.
+  function labelOnly(n) {
+    const label = n.getAttribute('aria-label');
+    return label && /^(img|meter|progressbar)$/.test(n.getAttribute('role') || '') && !n.textContent.trim() ? label.trim() : '';
+  }
+
   function text(opts = {}) {
     const root = opts.ref ? el(opts.ref) : document.body;
     const out = [];
@@ -779,6 +813,11 @@
       if (n.nodeType !== 1 || SKIP_TAGS.has(n.localName)) return;
       const v = isVisible(n);
       if (!v) return;
+      const label = labelOnly(n);
+      if (label) {
+        line += ` ${label} `;
+        return;
+      }
       if (n.localName === 'br') {
         out.push(line);
         line = '';
@@ -1162,7 +1201,10 @@
     const esc = (t) => t.replace(/\|/g, '\\|');
     const inline = (n) => {
       if (n.nodeType === 3) return n.data;
-      if (n.nodeType !== 1 || !isVisible(n) || NOT_CONTENT.test(n.localName)) return '';
+      if (n.nodeType !== 1 || !isVisible(n)) return '';
+      const label = labelOnly(n);
+      if (label) return ` ![${label}] `;
+      if (NOT_CONTENT.test(n.localName)) return '';
       const kids = [...n.childNodes].map(inline).join('');
       const t = kids.replace(/\s+/g, ' ').trim();
       if (!t && n.localName !== 'img') return kids;
@@ -1198,6 +1240,11 @@
         return;
       }
       if (n.nodeType !== 1 || !isVisible(n)) return;
+      const label = labelOnly(n);
+      if (label) {
+        line += ` ![${label}] `;
+        return;
+      }
       const tag = n.localName;
       if (NOT_CONTENT.test(tag)) return;
       if (n !== root && n.matches(CHROME)) return;

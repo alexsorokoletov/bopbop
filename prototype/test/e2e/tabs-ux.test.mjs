@@ -1,6 +1,7 @@
 // Extension mode tab UX: a session opens no empty tab of its own, and the agent can label its tab group.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { startServer } from '../../../fixtures/server.mjs';
 import { startRelay } from '../../src/relay.ts';
@@ -129,4 +130,12 @@ test('a Chrome rename failure is reported instead of claiming the group was rena
   await assert.rejects(c.setLabel('FAIL'), /group/i);
   assert.equal(c.label, previous);
   assert.deepEqual(await groups(), []);
+});
+
+test('a download from an agent tab reports the saved path and size', async () => {
+  await c.newTab(`${srv.base}/agent-ux/`);
+  const r = (await c.act([{ click: 'text=Export CSV' }], { snapshot: 'none' })).text;
+  const m = /download saved (.+?) \((\d+) bytes\)/.exec(r);
+  assert.ok(m, r);
+  assert.equal(readFileSync(m[1], 'utf8'), 'name,score\nALD,3.7\n');
 });
