@@ -391,8 +391,19 @@ chrome.tabs.onCreated.addListener((tab) => {
   if (!s || Date.now() - s.lastAgentInput > 3000) return;
   void s.addToGroup(tab.id!).then(() => s.adopt(tab));
 });
-// A download that starts right after an agent's input is that agent's: its server gets the saved path and size.
+// A download is an agent's only when it starts right after that agent's input AND comes from one of its tabs
+// (the referrer, or the URL for a file opened directly, is an agent tab's page): the user's downloads stay private.
 const downloadOwner = new Map<number, Session>(); // download id -> session
+const pageKey = (url: string | undefined) => (url || '').replace(/#.*/, '');
+async function downloadSession(d: chrome.downloads.DownloadItem) {
+  const recent = sessions.filter((x) => Date.now() - x.lastAgentInput < 3000).sort((a, b) => b.lastAgentInput - a.lastAgentInput);
+  const from = new Set([pageKey(d.referrer), pageKey(d.url)].filter(Boolean));
+  for (const s of recent) {
+    const tabs = await Promise.all([...s.agentTabs].map((id) => chrome.tabs.get(id).catch(() => null)));
+    if (tabs.some((t) => t && from.has(pageKey(t.url)))) return s;
+  }
+  return undefined;
+}
 const downloadInfo = (d: chrome.downloads.DownloadItem) => ({
   id: String(d.id),
   url: d.finalUrl || d.url,
@@ -402,10 +413,12 @@ const downloadInfo = (d: chrome.downloads.DownloadItem) => ({
   error: d.error,
 });
 chrome.downloads.onCreated.addListener((d) => {
-  const s = sessions.filter((x) => Date.now() - x.lastAgentInput < 3000).sort((a, b) => b.lastAgentInput - a.lastAgentInput)[0];
-  if (!s) return;
-  downloadOwner.set(d.id, s);
-  s.send({ method: 'Bbm.download', params: downloadInfo(d) });
+  void downloadSession(d).then((s) => {
+    if (!s) return;
+    downloadOwner.set(d.id, s);
+    // it may have finished while we looked: send its current state
+    void chrome.downloads.search({ id: d.id }).then(([now]) => s.send({ method: 'Bbm.download', params: downloadInfo(now || d) }));
+  });
 });
 chrome.downloads.onChanged.addListener((delta) => {
   const s = downloadOwner.get(delta.id);

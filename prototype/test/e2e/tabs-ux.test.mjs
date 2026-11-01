@@ -139,3 +139,15 @@ test('a download from an agent tab reports the saved path and size', async () =>
   assert.ok(m, r);
   assert.equal(readFileSync(m[1], 'utf8'), 'name,score\nALD,3.7\n');
 });
+
+test('a download the user starts while the agent works is not reported to the agent', async () => {
+  await c.newTab(`${srv.base}/agent-ux/`);
+  await c.act([{ press: 'Tab' }], { snapshot: 'none' }); // agent input just now
+  // not from an agent tab (no referrer): e.g. the user's own tab, another extension
+  await swEval(`chrome.downloads.download({url: ${JSON.stringify(srv.base + '/agent-ux/report.csv?user')}})`);
+  await new Promise((r) => setTimeout(r, 1000));
+  assert.deepEqual(
+    [...c.downloads.values()].filter((d) => /\?user/.test(d.url || '')),
+    [],
+  );
+});
