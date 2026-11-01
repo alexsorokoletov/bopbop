@@ -164,3 +164,11 @@ test('locator alternatives: when none matches, the error lists them', async () =
   await c.navigate(page);
   await assert.rejects(c.text({ ref: 'css=#a1, text=Missing' }), /no visible element for any of: css=#a1 \| text=Missing/);
 });
+
+test('a link that wraps a block (a card title: <a><h2>…</h2></a>) is clickable below the fold', async () => {
+  await c.navigate(page);
+  await js(`document.body.innerHTML = '<div style="height:2000px"></div><a id="title-link" href="#title-hit"><h2>Card title</h2></a>'`);
+  const r = await c.act([{ click: 'css=#title-link' }], { snapshot: 'none' });
+  assert.ok(r.ok, r.text);
+  assert.equal(await js('location.hash'), '#title-hit');
+});
