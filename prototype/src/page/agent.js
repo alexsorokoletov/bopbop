@@ -641,8 +641,8 @@
     if (!r.el) return { error: r.error };
     const e = r.el;
     if (!opts.noScroll) e.scrollIntoView({ block: opts.block || 'center', inline: 'center', behavior: 'instant' });
-    const rects = e.getClientRects();
-    const b = rects.length ? rects[0] : e.getBoundingClientRect();
+    // An inline element that wraps a block (<a><h2>…</h2></a>) starts with an empty fragment: skip it.
+    const b = [...e.getClientRects()].find((r) => r.width && r.height) || e.getBoundingClientRect();
     if (b.width === 0 && b.height === 0) return { error: `ref ${ref} has no box (hidden?)`, healed: r.healed };
     const fy = opts.position === 'before' ? 0.25 : opts.position === 'after' ? 0.75 : 0.5;
     const x = b.left + (opts.dx ?? b.width / 2),

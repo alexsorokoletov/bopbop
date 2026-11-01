@@ -79,6 +79,17 @@ Then load the Chrome extension ([2-minute guide](prototype/INSTALL.md)) and ask:
 
 > *Use bbm. Open example.com and tell me the heading.*
 
+## Demos
+
+The extension pairs with the server by itself: no token to paste. Each video is 30–40 s.
+
+| Video | What it shows |
+|---|---|
+| [Claude Code on macOS](docs/demos/bopbop-mac-claude.mp4) | Claude Code opens a blog post and summarizes it in the agent's own tab group. |
+| [Codex on macOS](docs/demos/bopbop-mac-codex.mp4) | The same task in Codex. |
+| [Terminal on macOS](docs/demos/bopbop-mac-terminal.mp4) | The raw MCP calls: label the tab group, navigate, snapshot, click, read. |
+| [Windows 11 + Edge](docs/demos/bopbop-windows-edge.mp4) | Native pairing on Windows through the registry, then navigate and click. |
+
 ## Why it feels different
 
 **It stays out of your way.** The agent works in its own tab group. It never takes your active tab and never steals focus. Up to 30 sessions share one Chrome, and each session sees only its own tabs. If you reload the extension or restart Chrome, the next call reconnects.
