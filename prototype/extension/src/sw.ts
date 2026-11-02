@@ -407,6 +407,41 @@ async function adoptPopup(tab: chrome.tabs.Tab) {
   s.adopt(tab);
 }
 chrome.tabs.onCreated.addListener((tab) => void adoptPopup(tab));
+// A download is an agent's only when it starts right after that agent's input AND comes from one of its tabs
+// (the referrer, or the URL for a file opened directly, is an agent tab's page): the user's downloads stay private.
+const downloadOwner = new Map<number, Session>(); // download id -> session
+const pageKey = (url: string | undefined) => (url || '').replace(/#.*/, '');
+async function downloadSession(d: chrome.downloads.DownloadItem) {
+  const recent = sessions.filter((x) => Date.now() - x.lastAgentInput < 3000).sort((a, b) => b.lastAgentInput - a.lastAgentInput);
+  const from = new Set([pageKey(d.referrer), pageKey(d.url)].filter(Boolean));
+  for (const s of recent) {
+    const tabs = await Promise.all([...s.agentTabs].map((id) => chrome.tabs.get(id).catch(() => null)));
+    if (tabs.some((t) => t && from.has(pageKey(t.url)))) return s;
+  }
+  return undefined;
+}
+const downloadInfo = (d: chrome.downloads.DownloadItem) => ({
+  id: String(d.id),
+  url: d.finalUrl || d.url,
+  path: d.filename || undefined,
+  bytes: d.fileSize >= 0 ? d.fileSize : undefined,
+  state: d.state === 'in_progress' ? 'in progress' : d.state,
+  error: d.error,
+});
+chrome.downloads.onCreated.addListener((d) => {
+  void downloadSession(d).then((s) => {
+    if (!s) return;
+    downloadOwner.set(d.id, s);
+    // it may have finished while we looked: send its current state
+    void chrome.downloads.search({ id: d.id }).then(([now]) => s.send({ method: 'Bbm.download', params: downloadInfo(now || d) }));
+  });
+});
+chrome.downloads.onChanged.addListener((delta) => {
+  const s = downloadOwner.get(delta.id);
+  if (!s || !(delta.state || delta.filename)) return;
+  if (delta.state && delta.state.current !== 'in_progress') downloadOwner.delete(delta.id);
+  void chrome.downloads.search({ id: delta.id }).then(([d]) => d && s.send({ method: 'Bbm.download', params: downloadInfo(d) }));
+});
 chrome.tabs.onUpdated.addListener((tabId, _info, tab) => {
   const s = owner.get(tabId);
   if (s?.discover) s.send({ method: 'Target.targetInfoChanged', params: { targetInfo: s.targetInfo(tab) } });

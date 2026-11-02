@@ -143,7 +143,9 @@ export async function launchChromium({
   // user's screen and wait for a click). A given userDataDir is the user's: we leave its settings alone.
   if (!userDataDir) {
     await mkdir(join(dir, 'Default'), { recursive: true });
-    await writeFile(join(dir, 'Default', 'Preferences'), JSON.stringify(QUIET_PREFS));
+    // Downloads stay in the throwaway profile, not in the user's Downloads folder.
+    const download = { default_directory: join(dir, 'Downloads'), prompt_for_download: false };
+    await writeFile(join(dir, 'Default', 'Preferences'), JSON.stringify({ ...QUIET_PREFS, download }));
   }
   const proc = spawn(
     executable,

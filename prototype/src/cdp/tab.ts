@@ -505,6 +505,7 @@ export class Tab {
       try {
         snap = await this.call(fid, 'snapshot', [{ prefix: f.prefix, mode: opts.mode, viewport: opts.viewport, ref }]);
       } catch (e: any) {
+        if (depth === 0) throw e; // the page (or the scope) itself: no snapshot, not one with no URL
         lines.push(' '.repeat(depth) + `(frame unavailable: ${e.message})`);
         return null;
       }
