@@ -37,7 +37,7 @@ const groupedUrls = () => swEval('chrome.tabs.query({}).then((ts) => ts.filter((
 test('the relay reports the build of the running extension', async () => {
   const build = await swEval('chrome.runtime.getManifest().version_name');
   assert.match(build, /\(\d{4}-.*Z; [a-f0-9]{12}\)/);
-  assert.ok(relayLogs.includes(`[bbm] extension build: ${JSON.stringify(build)}`));
+  assert.ok(relayLogs.includes(`[bopbop] extension build: ${JSON.stringify(build)}`));
 });
 
 test('init opens no tab', async () => {

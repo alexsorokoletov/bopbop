@@ -2,7 +2,7 @@
 // token, and only our extension IDs may call it (allowed_origins). The extension asks it when it has no token or
 // when the server's proof does not match (the token changed). The token still never crosses the WebSocket.
 //
-// Files: the host script and its launcher go to ~/.config/better-browser-mcp/ (not the npx cache, which can be
+// Files: the host script and its launcher go to ~/.config/bopbop/ (not the npx cache, which can be
 // cleared). macOS and Linux: one manifest per installed Chromium browser goes to that browser's per-user
 // NativeMessagingHosts folder. Windows: one manifest next to the launcher, and a per-user registry key per browser
 // (HKCU\Software\<browser>\NativeMessagingHosts\<name>) whose default value is the manifest path.
@@ -93,7 +93,7 @@ export function browserHostDirs({
 }
 
 // The host: one framed request in, one framed reply out (4-byte little-endian length + JSON). No dependencies.
-const hostScript = (tokenFile: string) => `// better-browser-mcp native messaging host: gives the relay token to the relay extension.
+const hostScript = (tokenFile: string) => `// bopbop native messaging host: gives the relay token to the relay extension.
 import { readFileSync } from 'node:fs';
 const TOKEN_FILE = ${JSON.stringify(tokenFile)};
 let buf = Buffer.alloc(0);
@@ -172,7 +172,7 @@ export function installNativeHost({
     JSON.stringify(
       {
         name: HOST_NAME,
-        description: 'better-browser-mcp: pairs the relay extension with the local MCP server',
+        description: 'bopbop: pairs the relay extension with the local MCP server',
         path: launcher,
         type: 'stdio',
         allowed_origins: ids.map((id) => `chrome-extension://${id}/`),
@@ -208,5 +208,5 @@ export function setupNativePairing(log: (m: string) => void) {
       .filter((s) => /^[a-p]{32}$/.test(s)) ?? []),
   );
   const { written } = installNativeHost({ ids, tokenFile: TOKEN_FILE, binDir: dirname(TOKEN_FILE) });
-  if (written.length) log(`[bbm] native pairing host installed: ${written.join(', ')}`);
+  if (written.length) log(`[bopbop] native pairing host installed: ${written.join(', ')}`);
 }

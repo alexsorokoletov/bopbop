@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// better-browser-mcp: token-lean browser control over MCP (stdio).
+// bopbop: token-lean browser control over MCP (stdio).
 // Modes (BBM_MODE): extension (default, relay, BBM_RELAY_PORT), connect (BBM_CDP_URL).
 // launch (a fresh, headless Chromium: BBM_HEADLESS, BBM_CHROME, BBM_CHROME_ARGS) is internal, for tests and the
 // benchmark only, and is not in the user docs.
 
-import { readFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -15,6 +15,7 @@ import { Controller, makeDeny, isDetached } from './controller.ts';
 import { listenRelay, listenRelayAuto, SLOTS, DEFAULT_PORT, type RelayServer } from './relay.ts';
 import { GROUP_COLORS } from './label.ts';
 import { setupNativePairing } from './native-host.ts';
+import { packageVersion } from './version.ts';
 import { ControllerSource } from './session.ts';
 import type { CDPBrowser } from './cdp/browser.ts';
 
@@ -82,21 +83,10 @@ export async function createBrowser(): Promise<CDPBrowser> {
   return launchChromium({ headless: process.env.BBM_HEADLESS !== '0' });
 }
 
-// package.json is one folder up from src/ (a checkout) and two up from dist/npm/ (the npm package).
-function packageVersion(): string {
-  for (const path of ['../package.json', '../../package.json']) {
-    try {
-      const pkg = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
-      if (pkg.name === 'bopbop') return pkg.version;
-    } catch {}
-  }
-  return '0.0.0';
-}
-
 const isLinkClosed = (e: unknown) => /CDP connection closed/.test((e as Error | undefined)?.message || '');
 
 export function buildServer(getController: () => Controller | Promise<Controller>) {
-  const server = new McpServer({ name: 'better-browser-mcp', version: packageVersion() }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'bopbop', version: packageVersion() }, { instructions: INSTRUCTIONS });
   const text = (s: string): CallToolResult => ({ content: [{ type: 'text', text: s }] });
   const fail = (m: string): CallToolResult => ({ content: [{ type: 'text', text: `error: ${m}` }], isError: true });
   // A notice (e.g. "the browser connection dropped and is back") goes in front of the next result, once.
@@ -406,7 +396,7 @@ async function main() {
     try {
       setupNativePairing((m) => process.stderr.write(m + '\n'));
     } catch (e: any) {
-      process.stderr.write(`[bbm] native pairing host not installed (paste the token instead): ${e.message}\n`);
+      process.stderr.write(`[bopbop] native pairing host not installed (paste the token instead): ${e.message}\n`);
     }
   }
   const source = new ControllerSource(createBrowser, {
@@ -443,6 +433,6 @@ async function main() {
 const entry = process.argv[1] && pathToFileURL(realpathSync(process.argv[1])).href;
 if (import.meta.url === entry || process.argv[1]?.endsWith('server.ts'))
   main().catch((e) => {
-    console.error('[bbm]', e);
+    console.error('[bopbop]', e);
     process.exit(1);
   });

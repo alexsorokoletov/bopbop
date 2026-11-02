@@ -1,22 +1,33 @@
-# better-browser-mcp: server reference
+# bopbop
+
+Give your AI agent (Claude Code, Codex, Cursor, any MCP client) your real Chrome, with your sign-ins. The agent works in its own tab group; your tabs stay yours. It reads pages as small text snapshots, not screenshots: in our benchmark, 72% fewer tokens and 3.5× faster than Claude in Chrome. Everything runs on your computer, no cloud.
+
+## Install
+
+1. Install the Chrome extension: [bopbop relay](https://chromewebstore.google.com/detail/emlckjhnbjogdooccahhbkhciflhobpp).
+2. Add the server to your agent:
+
+   ```bash
+   claude mcp add -s user bopbop -- npx -y bopbop
+   codex mcp add bopbop -- npx -y bopbop
+   ```
+
+3. Restart the agent. The extension pairs with the server automatically.
+
+Benchmark, demos and how it works: [github.com/alexsorokoletov/bopbop](https://github.com/alexsorokoletov/bopbop).
+
+---
+
+# Server reference
 
 The MCP server, the page agent and the relay extension. Setup steps for a team: [`INSTALL.md`](INSTALL.md).
 
-## Run
-
-From npm (the package is `bopbop`; the project is being renamed from better-browser-mcp):
-
-```bash
-claude mcp add -s user bbm -- npx -y bopbop
-codex mcp add bbm -- npx -y bopbop
-```
-
-From a clone:
+## Run from a clone
 
 ```bash
 bun install                                   # or: npm install
-claude mcp add -s user bbm -- bun /abs/path/prototype/src/server.ts
-codex mcp add bbm -- bun /abs/path/prototype/src/server.ts
+claude mcp add -s user bopbop -- bun /abs/path/prototype/src/server.ts
+codex mcp add bopbop -- bun /abs/path/prototype/src/server.ts
 ```
 
 Node 24+ also runs the server: replace `bun` with `node`.
