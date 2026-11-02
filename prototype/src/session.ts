@@ -36,9 +36,9 @@ export class ControllerSource {
     this.browser = this.#open();
     const c = new Controller(await this.browser, this.#opts);
     await c.init();
-    // The agent's label outlives a reconnect (the new extension link starts without it).
-    c.onLabel = (label) => {
-      this.#opts = { ...this.#opts, label };
+    // The agent's label and color outlive a reconnect (the new extension link starts without them).
+    c.onLabel = (label, color) => {
+      this.#opts = { ...this.#opts, label, color };
     };
     if (this.#lost) {
       c.notice = RECONNECT_NOTICE;

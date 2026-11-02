@@ -74,3 +74,24 @@ test('the idle period is a setting', async () => {
   assert.equal(await cleanup(3), 1);
   await swEval('chrome.storage.local.remove("cleanupDays")');
 });
+
+test("an orphan group the agent colored is cleaned up; the user's groups with that color stay", async () => {
+  await c.setLabel('GRN', 'green');
+  // The session's group as Chrome keeps it after a service-worker restart: no live session owns it any more.
+  await swEval('bbmForget()');
+  await makeGroup('Agent:GRN2', 'green'); // never colored by an agent: the user's
+  await makeGroup('Groceries', 'green');
+  assert.equal(await cleanup(8), 1);
+  const left = await titles();
+  assert.ok(!left.includes('Agent:GRN') && left.includes('Agent:GRN2') && left.includes('Groceries'), String(left));
+});
+
+test('a colored pair is remembered while any group still uses it, and forgotten when none does', async () => {
+  const keys = () => swEval('chrome.storage.local.get(null).then((o) => Object.keys(o).filter((k) => k.startsWith("colored:")).sort())');
+  // Two sessions color their groups at the same moment: both pairs are kept.
+  await swEval('Promise.all([bbmRemember("Agent:AA", "red"), bbmRemember("Agent:BB", "cyan")])');
+  assert.deepEqual(await keys(), ['colored:Agent:AA|red', 'colored:Agent:BB|cyan']);
+  await makeGroup('Agent:AA', 'red');
+  await cleanup(0); // nothing stale: Agent:AA keeps its pair, Agent:BB has no group any more
+  assert.deepEqual(await keys(), ['colored:Agent:AA|red']);
+});

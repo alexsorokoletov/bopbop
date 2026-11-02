@@ -12,6 +12,8 @@ $('save').onclick = async () => {
   const token = $('token').value.trim();
   const port = +$('port').value || 9333;
   const cleanupDays = Math.max(0, +$('cleanupDays').value || 0);
-  await chrome.storage.local.set<{ port: number; cleanupDays: number; token?: string }>(token ? { token, port, cleanupDays } : { port, cleanupDays });
+  await chrome.storage.local.set<{ port: number; cleanupDays: number; token?: string; tokenSource?: string }>(
+    token ? { token, tokenSource: 'manual', port, cleanupDays } : { port, cleanupDays },
+  );
   $('msg').textContent = 'saved';
 };

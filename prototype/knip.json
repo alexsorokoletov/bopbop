@@ -2,5 +2,6 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": ["scripts/*.{ts,mjs}", "test/**/*.test.mjs", "extension/src/*.ts", "src/page/agent.js"],
   "project": ["src/**/*.{ts,js}", "extension/src/**/*.ts", "scripts/**/*.{ts,mjs}", "test/**/*.mjs"],
-  "ignoreDependencies": ["@tsrs/wasm", "lefthook"]
+  "ignoreDependencies": ["@tsrs/wasm", "lefthook"],
+  "ignoreBinaries": ["reg"]
 }

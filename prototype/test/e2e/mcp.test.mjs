@@ -1,6 +1,7 @@
 // MCP over stdio: tool list, definition size budget, and a real login flow through tool calls.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -31,6 +32,11 @@ const call = async (name, args) => {
     .map((c) => c.text)
     .join('\n');
 };
+
+test('serverInfo.version is the package version', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+  assert.equal(client.getServerVersion().version, pkg.version);
+});
 
 test('tool list is small', async () => {
   const { tools } = await client.listTools();
@@ -79,6 +85,8 @@ test('login via MCP tools', async () => {
   assert.match(await call('eval', { expression: 'document.title' }), /Acme/);
   const shot = await client.callTool({ name: 'screenshot', arguments: {} });
   assert.equal(shot.content[0].type, 'image');
+  // how to turn image px into click_xy, with this shot's numbers
+  assert.match(shot.content[1].text, /click_xy = \[0 \+ imageX \/ [\d.]+, 0 \+ imageY \/ [\d.]+\]/);
 });
 
 test('errors are tool errors, not crashes', async () => {

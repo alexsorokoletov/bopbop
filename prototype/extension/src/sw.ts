@@ -12,7 +12,7 @@ const PROTOCOL = '1.3';
 // Servers take the first free port, so live ones sit at the low slots: we try only up to 2 slots past the highest
 // live one. Every `sweep` ms (also after a service-worker restart, which forgets what was live) we also try the
 // other slots, one per tick.
-const backoff = { min: 1000, max: 10000, sweep: 5 * 60_000 };
+const backoff = { min: 1000, max: 10000, sweep: 5 * 60_000, nativeAsk: 10_000 };
 
 // CDP params and results pass through untouched.
 type Json = any;
@@ -26,6 +26,8 @@ async function hmac(token: string, msg: string) {
   return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg)));
 }
 
+type GroupColor = `${chrome.tabGroups.Color}`; // 'purple', 'green', ...
+
 class Session {
   slot: number;
   ws: WebSocket | null;
@@ -37,6 +39,7 @@ class Session {
   agentWindowId: number | null;
   keepTabs: boolean;
   label: string;
+  color: GroupColor;
   lastAgentInput: number;
   touched: Set<number>;
   groupByWindow: Map<number, number>;
@@ -58,6 +61,7 @@ class Session {
     this.touched = new Set(); // agent tabs the user activated: kept (ungrouped) at session end
     this.groupByWindow = new Map(); // windowId -> groupId (one group per window: grouping moves tabs)
     this.label = ''; // Bbm.setLabel: group title "Agent:<label>" instead of "Agent N"
+    this.color = 'purple'; // Bbm.setLabel: the agent's group color
   }
 
   get title() {
@@ -98,10 +102,10 @@ class Session {
           this.groupByWindow.delete(windowId);
         }
       }
-      // After a service-worker restart we forget our groups: join this window's group with our title (purple,
-      // not another live session's) instead of making a second "Agent:CT2".
+      // After a service-worker restart we forget our groups: join this window's group with our title and color
+      // (not another live session's) instead of making a second "Agent:CT2".
       const live = new Set(sessions.flatMap((x) => [...x.groupByWindow.values()]));
-      const same = (await chrome.tabGroups.query({ windowId, color: 'purple', title: this.title })).find((g) => !live.has(g.id));
+      const same = (await chrome.tabGroups.query({ windowId, color: this.color, title: this.title })).find((g) => !live.has(g.id));
       if (same) {
         await chrome.tabs.group({ groupId: same.id, tabIds: [tabId] });
         this.groupByWindow.set(windowId, same.id);
@@ -109,7 +113,8 @@ class Session {
       }
       const groupId = await chrome.tabs.group({ tabIds: [tabId], createProperties: { windowId } });
       this.groupByWindow.set(windowId, groupId);
-      await chrome.tabGroups.update(groupId, { title: this.title, color: 'purple' });
+      await chrome.tabGroups.update(groupId, { title: this.title, color: this.color });
+      await rememberColored(this.title, this.color);
     } catch {
       /* groups unsupported (e.g. headless): ignore */
     }
@@ -155,18 +160,20 @@ class Session {
         this.keepTabs = !!params.keepTabs;
         return {};
       case 'Bbm.setLabel': {
-        const previous = this.label;
+        const [previous, previousColor] = [this.label, this.color];
         this.label = String(params.label || '').slice(0, 40); // checked by the server (1-5 graphemes)
+        this.color = params.color || 'purple'; // checked by the server (one of Chrome's colors)
         try {
           for (const groupId of this.groupByWindow.values()) {
-            const group = await chrome.tabGroups.update(groupId, { title: this.title });
+            const group = await chrome.tabGroups.update(groupId, { title: this.title, color: this.color });
             if (group?.title !== this.title) throw new Error('Chrome did not apply the tab group title');
           }
+          if (this.groupByWindow.size) await rememberColored(this.title, this.color);
         } catch (e) {
-          this.label = previous;
+          [this.label, this.color] = [previous, previousColor];
           throw e;
         }
-        return { groupsUpdated: this.groupByWindow.size };
+        return { groupsUpdated: this.groupByWindow.size, color: this.color };
       }
       case 'Bbm.clearForeignFrames':
         await clearForeignFrames(this.own(params.targetId));
@@ -293,8 +300,12 @@ class Session {
         return sock.close();
       }
       if (stage === 'hello' && m.type === 'hello') {
-        // The server must prove it knows the token before we run anything.
-        if (m.proof !== (await hmac(token, `server:${nonce}`))) return sock.close();
+        // The server must prove it knows the token before we run anything. A wrong proof may mean the server's
+        // token changed: ask the native host for the current one (a new token reconnects through storage.onChanged).
+        if (m.proof !== (await hmac(token, `server:${nonce}`))) {
+          void tokenFromNativeHost(token);
+          return sock.close();
+        }
         stage = 'auth';
         sock.send(JSON.stringify({ type: 'auth', proof: await hmac(token, `ext:${m.nonce}`) }));
       } else if (stage === 'auth' && m.type === 'ready') {
@@ -327,6 +338,7 @@ class Session {
     this.groupByWindow.clear();
     this.agentWindowId = null;
     this.label = '';
+    this.color = 'purple';
     for (const id of ids) {
       owner.delete(id);
       const tab = await chrome.tabs.get(id).catch(() => null);
@@ -356,10 +368,12 @@ async function clearForeignFrames(tabId: number) {
 const sessions = Array.from({ length: SLOTS }, (_, i) => new Session(i));
 const owner = new Map<number, Session>(); // tabId -> Session
 const selfActivated = new Map<number, number>(); // tabId -> time an agent activated it (not the user)
+const windowOpened = new Map<number, number[]>(); // agent tabId -> times its page opened a window (CDP Page.windowOpen)
 
 chrome.debugger.onEvent.addListener((source, method, params: Json) => {
   const s = owner.get(source.tabId!);
   if (!s) return;
+  if (method === 'Page.windowOpen') windowOpened.set(source.tabId!, [...(windowOpened.get(source.tabId!) || []), Date.now()]);
   if (method === 'Target.attachedToTarget') s.childSession.set(params.sessionId, source.tabId!);
   if (method === 'Target.detachedFromTarget') s.childSession.delete(params.sessionId);
   s.send({ method, params, sessionId: source.sessionId || tabSession(source.tabId!) });
@@ -372,12 +386,61 @@ chrome.debugger.onDetach.addListener((source) => {
   s.send({ method: 'Target.detachedFromTarget', params: { sessionId: tabSession(source.tabId!), targetId: String(source.tabId) } });
 });
 
-// Popups opened by agent tabs join the opener's session, but only right after that session's own input:
-// a tab the user (or another extension) opens from an agent tab later stays the user's.
-chrome.tabs.onCreated.addListener((tab) => {
-  const s = tab.openerTabId != null && owner.get(tab.openerTabId);
+// Popups opened by agent tabs join the opener's session, but only right after that session's own input, and only
+// when the page itself opened a window (window.open, a target=_blank link, a form). Chrome also gives an opener to
+// a tab the user opens with Cmd+T or from the address bar while an agent tab is active: that tab stays the user's.
+async function adoptPopup(tab: chrome.tabs.Tab) {
+  const opener = tab.openerTabId;
+  const s = opener != null && owner.get(opener);
   if (!s || Date.now() - s.lastAgentInput > 3000) return;
-  void s.addToGroup(tab.id!).then(() => s.adopt(tab));
+  // Each window the page opened adopts one tab.
+  const take = () => {
+    const opens = (windowOpened.get(opener) || []).filter((t) => Date.now() - t < 3000);
+    windowOpened.set(opener, opens.slice(1));
+    return opens.length > 0;
+  };
+  if (!take()) {
+    await new Promise((r) => setTimeout(r, 300)); // the CDP event may come after onCreated
+    if (!take()) return;
+  }
+  await s.addToGroup(tab.id!);
+  s.adopt(tab);
+}
+chrome.tabs.onCreated.addListener((tab) => void adoptPopup(tab));
+// A download is an agent's only when it starts right after that agent's input AND comes from one of its tabs
+// (the referrer, or the URL for a file opened directly, is an agent tab's page): the user's downloads stay private.
+const downloadOwner = new Map<number, Session>(); // download id -> session
+const pageKey = (url: string | undefined) => (url || '').replace(/#.*/, '');
+async function downloadSession(d: chrome.downloads.DownloadItem) {
+  const recent = sessions.filter((x) => Date.now() - x.lastAgentInput < 3000).sort((a, b) => b.lastAgentInput - a.lastAgentInput);
+  const from = new Set([pageKey(d.referrer), pageKey(d.url)].filter(Boolean));
+  for (const s of recent) {
+    const tabs = await Promise.all([...s.agentTabs].map((id) => chrome.tabs.get(id).catch(() => null)));
+    if (tabs.some((t) => t && from.has(pageKey(t.url)))) return s;
+  }
+  return undefined;
+}
+const downloadInfo = (d: chrome.downloads.DownloadItem) => ({
+  id: String(d.id),
+  url: d.finalUrl || d.url,
+  path: d.filename || undefined,
+  bytes: d.fileSize >= 0 ? d.fileSize : undefined,
+  state: d.state === 'in_progress' ? 'in progress' : d.state,
+  error: d.error,
+});
+chrome.downloads.onCreated.addListener((d) => {
+  void downloadSession(d).then((s) => {
+    if (!s) return;
+    downloadOwner.set(d.id, s);
+    // it may have finished while we looked: send its current state
+    void chrome.downloads.search({ id: d.id }).then(([now]) => s.send({ method: 'Bbm.download', params: downloadInfo(now || d) }));
+  });
+});
+chrome.downloads.onChanged.addListener((delta) => {
+  const s = downloadOwner.get(delta.id);
+  if (!s || !(delta.state || delta.filename)) return;
+  if (delta.state && delta.state.current !== 'in_progress') downloadOwner.delete(delta.id);
+  void chrome.downloads.search({ id: delta.id }).then(([d]) => d && s.send({ method: 'Bbm.download', params: downloadInfo(d) }));
 });
 chrome.tabs.onUpdated.addListener((tabId, _info, tab) => {
   const s = owner.get(tabId);
@@ -391,6 +454,7 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   selfActivated.delete(tabId);
+  windowOpened.delete(tabId);
   const s = owner.get(tabId);
   if (!s) return;
   owner.delete(tabId);
@@ -400,10 +464,35 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (s.discover) s.send({ method: 'Target.targetDestroyed', params: { targetId: String(tabId) } });
 });
 
+// ---- zero-paste pairing: the native host the MCP server installs gives the token to this extension only
+// (its manifest's allowed_origins). At most one ask per backoff.nativeAsk: each ask starts a process.
+const NATIVE_HOST = 'dev.bopbop.host';
+let lastNativeAsk = 0;
+async function tokenFromNativeHost(current: string) {
+  if (Date.now() - lastNativeAsk < backoff.nativeAsk) return;
+  // Only a token the host gave can be replaced. A pasted one (options page, or saved before native pairing
+  // existed: no tokenSource) is the user's.
+  const { tokenSource } = await chrome.storage.local.get<{ tokenSource?: string }>('tokenSource');
+  if (current && tokenSource !== 'native') return;
+  lastNativeAsk = Date.now();
+  try {
+    const reply = await chrome.runtime.sendNativeMessage(NATIVE_HOST, { type: 'pair' });
+    const token = typeof reply?.token === 'string' ? reply.token : '';
+    // The user may have saved a token while we waited: then theirs stays.
+    const { token: now = '' } = await chrome.storage.local.get<{ token?: string }>('token');
+    if (token.length >= 16 && token !== current && now === current) await chrome.storage.local.set({ token, tokenSource: 'native' });
+  } catch {
+    /* no host installed (the MCP server never ran here) or a browser without native messaging: paste the token */
+  }
+}
+
 let sweepCursor = SLOTS; // next slot of the running sweep (SLOTS = no sweep running)
 async function connectAll() {
   const { port = DEFAULT_PORT, token = '' } = await chrome.storage.local.get<{ port?: number; token?: string }>(['port', 'token']);
-  if (!token) return; // not paired: never connect
+  if (!token) {
+    void tokenFromNativeHost(''); // not paired: ask the native host, never connect without a token
+    return;
+  }
   // storage.session outlives a service-worker restart, so a worker that Chrome restarts every 30 s does not sweep each time.
   // A sweep tries one slot outside the window per tick, never all at once: Chrome queues connects to one host,
   // and a burst of refused ones would delay the pairing of a real server.
@@ -420,27 +509,41 @@ async function connectAll() {
 
 // ---- cleanup: agent groups no live session owns (left by a Chrome or service worker restart, or BBM_KEEP_TABS)
 // are closed once no tab in them was used for cleanupDays (options page; default 7, 0 = off). Closing a group's
-// last tab removes the group. Only purple groups with an agent title are candidates: never the user's groups.
+// last tab removes the group. Only groups with an agent title are candidates, and only purple ones or ones an
+// agent colored (title + color remembered in storage, one key per pair so sessions never overwrite each other):
+// never the user's groups.
 const AGENT_TITLE = /^Agent( \d+)?(:\S{1,40})?$/u; // Agent, Agent 2, Agent:CT2, Agent:🧪
 const DAY = 864e5;
+const coloredKey = (title: string | undefined, color: string) => `colored:${title}|${color}`;
+
+async function rememberColored(title: string, color: GroupColor) {
+  if (color !== 'purple') await chrome.storage.local.set({ [coloredKey(title, color)]: 1 });
+}
+
 async function bbmCleanup({ now = Date.now() } = {}) {
   const { cleanupDays = 7 } = await chrome.storage.local.get<{ cleanupDays?: number }>('cleanupDays');
   if (!(cleanupDays > 0)) return 0;
   const live = new Set(sessions.flatMap((s) => [...s.groupByWindow.values()]));
+  const colored = new Set(Object.keys(await chrome.storage.local.get(null)).filter((k) => k.startsWith('colored:')));
   const stale: number[] = [];
-  for (const g of await chrome.tabGroups.query({ color: 'purple' })) {
-    if (live.has(g.id) || !AGENT_TITLE.test(g.title || '')) continue;
+  for (const g of await chrome.tabGroups.query({})) {
+    if (live.has(g.id) || !AGENT_TITLE.test(g.title || '') || (g.color !== 'purple' && !colored.has(coloredKey(g.title, g.color)))) continue;
     const tabs = await chrome.tabs.query({ groupId: g.id });
     // lastAccessed is missing on very old Chrome: keep the group then.
     if (tabs.every((t) => t.lastAccessed && now - t.lastAccessed > cleanupDays * DAY)) stale.push(...tabs.map((t) => t.id!));
   }
   if (stale.length) await chrome.tabs.remove(stale).catch(() => {});
+  // Forget the pairs no group has any more (closed here or by the user); keep those another group still uses.
+  const left = new Set((await chrome.tabGroups.query({})).map((g) => coloredKey(g.title, g.color)));
+  const gone = [...colored].filter((k) => !left.has(k));
+  if (gone.length) await chrome.storage.local.remove(gone);
   return stale.length;
 }
-// Test hooks: bbmCleanup with a future `now`; bbmBackoff to shorten the waits; bbmAttempts = connect times per slot.
+// Test hooks: bbmCleanup with a future `now`; bbmRemember = rememberColored; bbmBackoff to shorten the waits; bbmAttempts = connect times per slot.
 // bbmDisconnect drops every server link, as an extension reload or a Chrome restart would; bbmSweep starts/stops a sweep.
 Object.assign(globalThis, {
   bbmCleanup,
+  bbmRemember: rememberColored,
   bbmBackoff: backoff,
   bbmAttempts: () => sessions.map((s) => s.attemptTimes),
   bbmDisconnect: () => {
