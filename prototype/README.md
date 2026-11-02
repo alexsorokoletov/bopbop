@@ -8,50 +8,25 @@ Give your AI agent (Claude Code, Codex, Cursor, any MCP client) your real Chrome
 2. Add the server to your agent:
 
    ```bash
-   claude mcp add -s user bopbop -- npx -y bopbop
-   codex mcp add bopbop -- npx -y bopbop
+   claude mcp add -s user bopbop -- npx -y bopbop    # Claude Code
+   codex mcp add bopbop -- npx -y bopbop             # Codex
    ```
 
-3. Restart the agent. The extension pairs with the server automatically.
+   Cursor and other MCP clients: add this to the client's MCP config (for Cursor, `~/.cursor/mcp.json`):
 
-Benchmark, demos and how it works: [github.com/alexsorokoletov/bopbop](https://github.com/alexsorokoletov/bopbop).
+   ```json
+   { "mcpServers": { "bopbop": { "command": "npx", "args": ["-y", "bopbop"] } } }
+   ```
 
----
+3. Optional: teach your agent how to use it well (batch steps, read data without screenshots):
 
-# Server reference
+   ```bash
+   npx skills add alexsorokoletov/bopbop
+   ```
 
-The MCP server, the page agent and the relay extension. Setup steps for a team: [`INSTALL.md`](INSTALL.md).
+4. Restart the agent and ask: *"Use bopbop. Open example.com and tell me the heading."* A tab opens in an **Agent** tab group in your Chrome. The extension pairs with the server by itself; there is nothing to paste.
 
-## Run from a clone
-
-```bash
-bun install                                   # or: npm install
-claude mcp add -s user bopbop -- bun /abs/path/prototype/src/server.ts
-codex mcp add bopbop -- bun /abs/path/prototype/src/server.ts
-```
-
-Node 24+ also runs the server: replace `bun` with `node`.
-
-## Modes (`BBM_MODE`)
-
-| Mode | What it does | Settings |
-|---|---|---|
-| `connect` | Attaches to a running browser over CDP. | `BBM_CDP_URL=http://127.0.0.1:9222` |
-| `extension` (default) | Drives **your real Chrome profile** through the relay extension (build and load `dist/extension` unpacked). | `BBM_RELAY_PORT` pins one port; default: the first free port of 9333–9362 (30 sessions) |
-
-## Settings
-
-| Setting | Effect |
-|---|---|
-| `BBM_GUARD=shop-social` | Blocks Buy now, Place order, checkout pages and Post buttons (step checks, in-page guard, browser-level blocking). Under the guard, JavaScript clicks through `eval` are blocked too. |
-| `BBM_ALLOW=http://127.0.0.1:*,*.example.com` | Origin allowlist. Fails closed. Enforced in the browser (documents, frames, redirects, popups). |
-| `BBM_UPLOAD_ROOTS=/path/a,/path/b` | Upload files only from these folders (default `~/Downloads`, `$TMPDIR/bbm-uploads`). Hidden files are refused. |
-| `BBM_OUTPUT_DIR=/path` | Where HAR files go (default `~/Downloads/bbm`). The agent gives only a file name. |
-| `BBM_SHOW_COOKIES=1` | Show cookie and credential header values in full (default: shortened). |
-| `BBM_WINDOW=agent` | Extension mode: agent tabs in their own unfocused window. |
-| `BBM_KEEP_TABS=1` | Extension mode: keep the agent's tabs open when the session ends. |
-| `BBM_FRONT=1` | Extension mode: bring agent tabs to the front (old behavior). |
-| `BBM_TRACE=1` | Timing traces on stderr. |
+Needs Node.js 24+ and Chrome (or Edge, Brave, Chromium) 125+.
 
 ## Tools
 
@@ -73,12 +48,36 @@ Node 24+ also runs the server: replace `bun` with `node`.
 
 `act` steps: `click`, `type` (+`submit`), `press`, `hover`, `select` (native or custom combobox, verified), `check`/`uncheck`, `upload`, `drag` (+`position`), `click_xy`, `scroll` (+`until`), `wait`, `wait_for`, `dialog`, `navigate`. Any ref field also accepts `text=Label`.
 
-## Test
+## Settings
 
-```bash
-npm test                 # unit + e2e (fixture tasks, guard, modal scope, extract, network, perf, emulate) + MCP stdio
-npm run test:extension   # the fixture suite through the extension relay (chrome.debugger)
-npm run bench:runtime    # Node vs Bun timings
-```
+Set them when you add the server, for example `claude mcp add -s user bopbop -e BBM_GUARD=shop-social -- npx -y bopbop`, or under `"env"` in a JSON config.
 
-Extension-only suites (focus, parallel sessions, other extensions) run in `npm test` with a test Chromium that loads the extension.
+| Setting | Effect |
+|---|---|
+| `BBM_GUARD=shop-social` | Blocks Buy now, Place order, checkout pages and Post buttons (step checks, in-page guard, browser-level blocking). Under the guard, JavaScript clicks through `eval` are blocked too. |
+| `BBM_ALLOW=http://127.0.0.1:*,*.example.com` | Origin allowlist. Fails closed. Enforced in the browser (documents, frames, redirects, popups). |
+| `BBM_UPLOAD_ROOTS=/path/a,/path/b` | Upload files only from these folders (default `~/Downloads`, `$TMPDIR/bbm-uploads`). Hidden files are refused. |
+| `BBM_OUTPUT_DIR=/path` | Where HAR files go (default `~/Downloads/bbm`). The agent gives only a file name. |
+| `BBM_SHOW_COOKIES=1` | Show cookie and credential header values in full (default: shortened). |
+| `BBM_WINDOW=agent` | Extension mode: agent tabs in their own unfocused window. |
+| `BBM_KEEP_TABS=1` | Extension mode: keep the agent's tabs open when the session ends. |
+| `BBM_FRONT=1` | Extension mode: bring agent tabs to the front (old behavior). |
+| `BBM_TRACE=1` | Timing traces on stderr. |
+| `BBM_MODE=connect` + `BBM_CDP_URL=http://127.0.0.1:9222` | Use a browser that you started with remote debugging, not the extension. |
+
+## If it does not work
+
+| Symptom | Fix |
+|---|---|
+| `extension did not connect/pair` | Check that the bopbop extension is installed and on, then restart the agent. If it still does not pair, paste the token from `~/.config/bopbop/relay-token` on the extension's options page. |
+| `all 30 bopbop slots are taken` | 30 agent sessions already use this Chrome, or old ones did not exit. Close the sessions you do not use. |
+| `blocked: ... is not in the allowlist (BBM_ALLOW)` | `BBM_ALLOW` is set and does not include that site. Add it. |
+| The agent says the tools are missing | Run `claude mcp list` (or `codex mcp list`): `bopbop` must be connected. |
+
+Something else: [open an issue](https://github.com/alexsorokoletov/bopbop/issues).
+
+## Privacy
+
+Everything stays on your computer: the extension talks only to the server on `127.0.0.1`, with no analytics. [Privacy policy](https://github.com/alexsorokoletov/bopbop/blob/main/PRIVACY.md).
+
+Developing bopbop itself (run from a clone, tests, building the extension): [DEVELOPMENT.md](https://github.com/alexsorokoletov/bopbop/blob/main/DEVELOPMENT.md).
