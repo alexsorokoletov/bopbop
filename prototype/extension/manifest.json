@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "better-browser-mcp relay",
+  "name": "bopbop relay",
   "version": "0.1.0",
-  "description": "Lets a local better-browser-mcp server control agent tabs in this browser (local WebSocket only, no cloud).",
+  "description": "Lets a local bopbop server control agent tabs in this browser (local WebSocket only, no cloud).",
   "minimum_chrome_version": "125",
   "permissions": ["debugger", "tabs", "tabGroups", "storage", "alarms", "scripting", "nativeMessaging", "downloads"],
   "background": {
@@ -16,7 +16,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "better-browser-mcp",
+    "default_title": "bopbop",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png"
