@@ -20,7 +20,37 @@ jobs:
       - run: npx knip
       - run: npm audit --audit-level=high
 
+  # The test jobs run in parallel: the slowest one sets the wall time (about 2 min), not their sum.
+  # Node: the whole suite once, with coverage (files run in parallel).
   test:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: prototype } }
+    env:
+      BBM_HEADLESS: "1"
+      BBM_CHROME_ARGS: "--no-sandbox" # Ubuntu 24.04 runners block the unprivileged sandbox (AppArmor)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24, cache: npm, cache-dependency-path: prototype/package-lock.json }
+      - run: npm ci --ignore-scripts
+      # Chromium, not branded Chrome: Chrome 137+ ignores --load-extension, which the extension tests need.
+      - run: npx -y playwright@1.56.1 install chromium # the runner image has Chrome's system libraries
+      - run: npm run coverage
+      - name: fixtures, mining and skill tests
+        working-directory: .
+        run: node --test 'fixtures/test/*.test.mjs' 'mining/test/*.test.mjs'
+
+  # Bun runs test files one at a time (253 s in one job). Four runners, about 65 s each, split by measured time.
+  # Not several files at once on one runner: the timing tests (backoff, shutdown) then fail under CPU load.
+  test-bun:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: 1, files: "fixtures emulate guard" }
+          - { shard: 2, files: "pairing backoff tabs-ux other-extensions" }
+          - { shard: 3, files: "agent-ux slots reconnect parallel shutdown" }
+          - { shard: 4, files: "" } # every other file, new ones too
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: prototype } }
     env:
@@ -34,14 +64,33 @@ jobs:
       - run: npm ci --ignore-scripts
       # Chromium, not branded Chrome: Chrome 137+ ignores --load-extension, which the extension tests need.
       - run: npx -y playwright@1.56.1 install chromium # the runner image has Chrome's system libraries
-      - run: npm test
-      - run: npm run test:bun
+      - name: bun test (shard ${{ matrix.shard }})
+        env: { FILES: "${{ matrix.files }}" }
+        run: |
+          if [ -n "$FILES" ]; then
+            LIST=$(for f in $FILES; do echo "./test/e2e/$f.test.mjs"; done)
+          else
+            SHARDED="fixtures emulate guard pairing backoff tabs-ux other-extensions agent-ux slots reconnect parallel shutdown"
+            LIST=$(ls test/unit/*.test.mjs test/e2e/*.test.mjs | grep -v -E "/($(echo $SHARDED | tr ' ' '|'))\.test\.mjs$" | sed 's#^#./#')
+          fi
+          for f in $LIST; do [ -f "$f" ] || { echo "::error::no such test file: $f"; exit 1; }; done
+          bun test --timeout 60000 $LIST
+
+  test-extension:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: prototype } }
+    env:
+      BBM_HEADLESS: "1"
+      BBM_CHROME_ARGS: "--no-sandbox" # Ubuntu 24.04 runners block the unprivileged sandbox (AppArmor)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24, cache: npm, cache-dependency-path: prototype/package-lock.json }
+      - run: npm ci --ignore-scripts
+      # Chromium, not branded Chrome: Chrome 137+ ignores --load-extension, which the extension tests need.
+      - run: npx -y playwright@1.56.1 install chromium # the runner image has Chrome's system libraries
       - run: npm run test:extension
         env: { BBM_RELAY_PORT: "9390" }
-      - run: npm run coverage
-      - name: fixtures, mining and skill tests
-        working-directory: .
-        run: node --test 'fixtures/test/*.test.mjs' 'mining/test/*.test.mjs'
 
   # Windows: native pairing (registry + .bat launcher) against a real Chromium.
   windows:
