@@ -1,13 +1,13 @@
 ---
 name: bopbop
-description: Drive the user's real Chrome (their sign-ins) with the bopbop browser MCP (tools named mcp__bbm__* or mcp__bopbop__*) at few tokens. Use it whenever a task needs a web page — open a site, sign in, fill a form, click through an app, read a table or a dashboard, check a deploy, test a local web app, look at network requests or performance — and whenever the user says "use bbm", "use bopbop", "in my browser" or "in Chrome". Prefer it over screenshots-first browser tools.
+description: Drive the user's real Chrome (their sign-ins) with the bopbop browser MCP (tools named mcp__bopbop__*, or mcp__bbm__* in older setups) at few tokens. Use it whenever a task needs a web page — open a site, sign in, fill a form, click through an app, read a table or a dashboard, check a deploy, test a local web app, look at network requests or performance — and whenever the user says "use bbm", "use bopbop", "in my browser" or "in Chrome". Prefer it over screenshots-first browser tools.
 ---
 
 # bopbop: the user's Chrome, in text
 
 bopbop gives you the user's real Chrome through an MCP server. You work in your own tab group. The user's other tabs are hidden from you, and you never take their active tab.
 
-The tools are `mcp__bbm__<tool>` (the server key is `bbm` until the rename to `bopbop` is complete). If they are deferred, load them in one ToolSearch call, for example `select:mcp__bbm__navigate,mcp__bbm__act,mcp__bbm__tabs,mcp__bbm__extract,mcp__bbm__read,mcp__bbm__snapshot`.
+The tools are `mcp__bopbop__<tool>` (`mcp__bbm__<tool>` if the user added the server as `bbm`). If they are deferred, load them in one ToolSearch call, for example `select:mcp__bopbop__navigate,mcp__bopbop__act,mcp__bopbop__tabs,mcp__bopbop__extract,mcp__bopbop__read,mcp__bopbop__snapshot`.
 
 ## First call
 
@@ -59,7 +59,7 @@ Do not use `eval` to read text or tables. `extract` and `read` are shorter and s
 
 | Message | Do this |
 |---|---|
-| `extension did not connect/pair` | Ask the user to install or turn on the bopbop extension in Chrome. Pairing is automatic after the MCP server has run once (macOS, Linux). On Windows they paste the token from `~/.config/better-browser-mcp/relay-token` on the extension options page. |
+| `extension did not connect/pair` | Ask the user to install or turn on the bopbop extension in Chrome. Pairing is automatic after the MCP server has run once (macOS, Linux, Windows). If it still does not pair, they paste the token from `~/.config/bopbop/relay-token` on the extension options page. |
 | `the browser connection dropped and is back` | Your earlier tabs and refs are gone. Navigate again. |
 | `extension is outdated` | Ask the user to update the extension (Web Store) or rebuild and reload it (`npm run build:extension`). |
 | `blocked: ... not in the allowlist (BBM_ALLOW)` | The user limited the sites. Ask before you go elsewhere. |
