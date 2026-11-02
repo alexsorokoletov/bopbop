@@ -1,7 +1,8 @@
 name: Publish extension
 
-# Builds the relay extension from a commit that passed CI and submits it to the Chrome Web Store.
-# Secrets: CHROME_EXTENSION_ID, CHROME_CLIENT_ID, CHROME_CLIENT_SECRET, CHROME_REFRESH_TOKEN.
+# Builds the relay extension from a commit that passed CI, signs it as a CRX and submits it to the Chrome Web Store.
+# Verified CRX uploads are on: the store takes only a CRX signed with the key whose public half is certs/bopbop-crx.pub.pem.
+# Secrets: CHROME_EXTENSION_ID, CHROME_CLIENT_ID, CHROME_CLIENT_SECRET, CHROME_REFRESH_TOKEN, CHROME_CRX_KEY (private key PEM).
 on:
   workflow_dispatch:
     inputs:
@@ -36,7 +37,23 @@ jobs:
           VERSION="0.1.$(git rev-list --count HEAD)"
           npm run -s build:extension -- --zip --version "$VERSION"
           echo "zip=$(ls dist/bopbop-extension-$VERSION-*.zip)" >> "$GITHUB_OUTPUT"
+          echo "crx=dist/bopbop-extension-$VERSION.crx" >> "$GITHUB_OUTPUT"
           echo "Version $VERSION" >> "$GITHUB_STEP_SUMMARY"
+      - name: Sign CRX
+        env: { CRX_KEY: '${{ secrets.CHROME_CRX_KEY }}', CRX: '${{ steps.build.outputs.crx }}' }
+        run: |
+          KEY="$RUNNER_TEMP/crx-key.pem"
+          umask 077
+          printf '%s\n' "$CRX_KEY" > "$KEY"
+          # The secret must be the private half of the registered key (crx3 would make a new key if it found none).
+          openssl pkey -pubin -in ../certs/bopbop-crx.pub.pem -outform DER > "$RUNNER_TEMP/pub.der"
+          if ! openssl pkey -in "$KEY" -pubout -outform DER | cmp -s - "$RUNNER_TEMP/pub.der"; then
+            echo "::error::CHROME_CRX_KEY does not match certs/bopbop-crx.pub.pem"; rm -f "$KEY"; exit 1
+          fi
+          npx -y crx3@2.0.0 -p "$KEY" -o "$CRX" dist/extension
+          rm -f "$KEY"
+          # The CRX header must carry the registered public key.
+          node -e "const fs=require('fs');const c=fs.readFileSync(process.argv[1]);const k=fs.readFileSync(process.argv[2]);if(c.subarray(0,4).toString()!=='Cr24'||c.readUInt32LE(4)!==3||!c.subarray(0,12+c.readUInt32LE(8)).includes(k)){console.error('::error::CRX is not signed with the registered key');process.exit(1)}" "$CRX" "$RUNNER_TEMP/pub.der"
       - uses: actions/upload-artifact@v4
         with: { name: extension-zip, path: '${{ steps.build.outputs.zip }}' }
       # v3: v4 dropped the auth flags and needs a publisherId.
@@ -47,7 +64,7 @@ jobs:
           CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
         run: >
-          npx -y chrome-webstore-upload-cli@3 upload --source "${{ steps.build.outputs.zip }}"
+          npx -y chrome-webstore-upload-cli@3 upload --source "${{ steps.build.outputs.crx }}"
           --extension-id "$EXTENSION_ID" --client-id "$CLIENT_ID" --client-secret "$CLIENT_SECRET" --refresh-token "$REFRESH_TOKEN"
       - name: Submit for review
         if: inputs.publish
