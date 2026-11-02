@@ -1,6 +1,7 @@
 // Extension mode tab UX: a session opens no empty tab of its own, and the agent can label its tab group.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { startServer } from '../../../fixtures/server.mjs';
 import { startRelay } from '../../src/relay.ts';
@@ -129,4 +130,47 @@ test('a Chrome rename failure is reported instead of claiming the group was rena
   await assert.rejects(c.setLabel('FAIL'), /group/i);
   assert.equal(c.label, previous);
   assert.deepEqual(await groups(), []);
+});
+
+test('when the current tab closes, the tab used before it becomes current', async () => {
+  const [a, b] = [await c.newTab(`${srv.base}/login-form/?a`), await c.newTab(`${srv.base}/login-form/?b`)];
+  await c.newTab(`${srv.base}/login-form/?last`);
+  await c.selectTab(a);
+  await c.selectTab(b);
+  await c.closeTab(b);
+  assert.equal(c.current, a);
+  const [x, y] = [await c.newTab(`${srv.base}/login-form/?x`), await c.newTab(`${srv.base}/login-form/?y`)];
+  await c.newTab(`${srv.base}/login-form/?last2`);
+  await c.selectTab(x);
+  await c.selectTab(y);
+  await swEval(`chrome.tabs.remove(${+c.tabs.get(y).targetId})`); // closed by the user or the page
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(c.current, x);
+});
+
+test('an agent tab moved to a browser page (chrome://) fails with a clear message', async () => {
+  const sid = await c.newTab(`${srv.base}/login-form/`);
+  await swEval(`chrome.tabs.update(${+c.tabs.get(sid).targetId}, {url: 'chrome://version/'})`);
+  await new Promise((r) => setTimeout(r, 500));
+  await assert.rejects(c.snapshot({}), /browser page chrome:\/\/version.*navigate it to a web page or pick another tab/);
+});
+
+test('a download from an agent tab reports the saved path and size', async () => {
+  await c.newTab(`${srv.base}/agent-ux/`);
+  const r = (await c.act([{ click: 'text=Export CSV' }], { snapshot: 'none' })).text;
+  const m = /download saved (.+?) \((\d+) bytes\)/.exec(r);
+  assert.ok(m, r);
+  assert.equal(readFileSync(m[1], 'utf8'), 'name,score\nALD,3.7\n');
+});
+
+test('a download the user starts while the agent works is not reported to the agent', async () => {
+  await c.newTab(`${srv.base}/agent-ux/`);
+  await c.act([{ press: 'Tab' }], { snapshot: 'none' }); // agent input just now
+  // not from an agent tab (no referrer): e.g. the user's own tab, another extension
+  await swEval(`chrome.downloads.download({url: ${JSON.stringify(srv.base + '/agent-ux/report.csv?user')}})`);
+  await new Promise((r) => setTimeout(r, 1000));
+  assert.deepEqual(
+    [...c.downloads.values()].filter((d) => /\?user/.test(d.url || '')),
+    [],
+  );
 });

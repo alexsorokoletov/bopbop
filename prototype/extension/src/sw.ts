@@ -368,10 +368,12 @@ async function clearForeignFrames(tabId: number) {
 const sessions = Array.from({ length: SLOTS }, (_, i) => new Session(i));
 const owner = new Map<number, Session>(); // tabId -> Session
 const selfActivated = new Map<number, number>(); // tabId -> time an agent activated it (not the user)
+const windowOpened = new Map<number, number[]>(); // agent tabId -> times its page opened a window (CDP Page.windowOpen)
 
 chrome.debugger.onEvent.addListener((source, method, params: Json) => {
   const s = owner.get(source.tabId!);
   if (!s) return;
+  if (method === 'Page.windowOpen') windowOpened.set(source.tabId!, [...(windowOpened.get(source.tabId!) || []), Date.now()]);
   if (method === 'Target.attachedToTarget') s.childSession.set(params.sessionId, source.tabId!);
   if (method === 'Target.detachedFromTarget') s.childSession.delete(params.sessionId);
   s.send({ method, params, sessionId: source.sessionId || tabSession(source.tabId!) });
@@ -384,12 +386,61 @@ chrome.debugger.onDetach.addListener((source) => {
   s.send({ method: 'Target.detachedFromTarget', params: { sessionId: tabSession(source.tabId!), targetId: String(source.tabId) } });
 });
 
-// Popups opened by agent tabs join the opener's session, but only right after that session's own input:
-// a tab the user (or another extension) opens from an agent tab later stays the user's.
-chrome.tabs.onCreated.addListener((tab) => {
-  const s = tab.openerTabId != null && owner.get(tab.openerTabId);
+// Popups opened by agent tabs join the opener's session, but only right after that session's own input, and only
+// when the page itself opened a window (window.open, a target=_blank link, a form). Chrome also gives an opener to
+// a tab the user opens with Cmd+T or from the address bar while an agent tab is active: that tab stays the user's.
+async function adoptPopup(tab: chrome.tabs.Tab) {
+  const opener = tab.openerTabId;
+  const s = opener != null && owner.get(opener);
   if (!s || Date.now() - s.lastAgentInput > 3000) return;
-  void s.addToGroup(tab.id!).then(() => s.adopt(tab));
+  // Each window the page opened adopts one tab.
+  const take = () => {
+    const opens = (windowOpened.get(opener) || []).filter((t) => Date.now() - t < 3000);
+    windowOpened.set(opener, opens.slice(1));
+    return opens.length > 0;
+  };
+  if (!take()) {
+    await new Promise((r) => setTimeout(r, 300)); // the CDP event may come after onCreated
+    if (!take()) return;
+  }
+  await s.addToGroup(tab.id!);
+  s.adopt(tab);
+}
+chrome.tabs.onCreated.addListener((tab) => void adoptPopup(tab));
+// A download is an agent's only when it starts right after that agent's input AND comes from one of its tabs
+// (the referrer, or the URL for a file opened directly, is an agent tab's page): the user's downloads stay private.
+const downloadOwner = new Map<number, Session>(); // download id -> session
+const pageKey = (url: string | undefined) => (url || '').replace(/#.*/, '');
+async function downloadSession(d: chrome.downloads.DownloadItem) {
+  const recent = sessions.filter((x) => Date.now() - x.lastAgentInput < 3000).sort((a, b) => b.lastAgentInput - a.lastAgentInput);
+  const from = new Set([pageKey(d.referrer), pageKey(d.url)].filter(Boolean));
+  for (const s of recent) {
+    const tabs = await Promise.all([...s.agentTabs].map((id) => chrome.tabs.get(id).catch(() => null)));
+    if (tabs.some((t) => t && from.has(pageKey(t.url)))) return s;
+  }
+  return undefined;
+}
+const downloadInfo = (d: chrome.downloads.DownloadItem) => ({
+  id: String(d.id),
+  url: d.finalUrl || d.url,
+  path: d.filename || undefined,
+  bytes: d.fileSize >= 0 ? d.fileSize : undefined,
+  state: d.state === 'in_progress' ? 'in progress' : d.state,
+  error: d.error,
+});
+chrome.downloads.onCreated.addListener((d) => {
+  void downloadSession(d).then((s) => {
+    if (!s) return;
+    downloadOwner.set(d.id, s);
+    // it may have finished while we looked: send its current state
+    void chrome.downloads.search({ id: d.id }).then(([now]) => s.send({ method: 'Bbm.download', params: downloadInfo(now || d) }));
+  });
+});
+chrome.downloads.onChanged.addListener((delta) => {
+  const s = downloadOwner.get(delta.id);
+  if (!s || !(delta.state || delta.filename)) return;
+  if (delta.state && delta.state.current !== 'in_progress') downloadOwner.delete(delta.id);
+  void chrome.downloads.search({ id: delta.id }).then(([d]) => d && s.send({ method: 'Bbm.download', params: downloadInfo(d) }));
 });
 chrome.tabs.onUpdated.addListener((tabId, _info, tab) => {
   const s = owner.get(tabId);
@@ -403,6 +454,7 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   selfActivated.delete(tabId);
+  windowOpened.delete(tabId);
   const s = owner.get(tabId);
   if (!s) return;
   owner.delete(tabId);

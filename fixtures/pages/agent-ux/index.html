@@ -19,6 +19,10 @@
 <body>
 <header id="hdr">Header <span id="auth"></span> <span id="status">none picked</span></header>
 <main>
+  <div role="tablist" id="tabs"><button role="tab">Releases</button> <button role="tab">Overview</button> <button role="tab">Releases archive</button></div>
+  <h2>Releases</h2>
+  <a href="report.csv" download>Export CSV</a>
+  <p id="rating"><span role="img" aria-label="Rated 3.7 stars out of five stars"><svg width="40" height="8"></svg></span> 441 reviews <button aria-label="Share"></button></p>
   <div class="tiles" id="tiles">
     <div class="tile">ALD</div>
     <div class="tile">BRK</div>
@@ -33,6 +37,7 @@
 </main>
 <script>
   for (const t of document.querySelectorAll('.tile')) t.onclick = () => { document.getElementById('status').textContent = 'picked ' + t.textContent; };
+  for (const t of document.querySelectorAll('[role=tab]')) t.onclick = () => { document.getElementById('status').textContent = 'tab ' + t.textContent; };
   if (location.hash === '#signin') sessionStorage.setItem('auth', 'token-123');
   document.getElementById('auth').textContent = sessionStorage.getItem('auth') ? 'signed in' : 'signed out';
   for (let i = 0; i < 5; i++) console.error('HMR socket failed');

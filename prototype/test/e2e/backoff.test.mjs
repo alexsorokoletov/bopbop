@@ -39,10 +39,11 @@ test('a port with no server is tried less and less often', async () => {
 
 test('a server that starts later pairs within the cap; after it goes away, the next try comes soon', async () => {
   const t0 = Date.now();
-  const browser = await startRelay({ port: BASE, token, timeoutMs: CAP + 4000, log: () => {} });
+  const browser = await startRelay({ port: BASE, token, timeoutMs: CAP * 3, log: () => {} });
   const paired = Date.now() - t0;
-  // cap + one 1 s connect tick + Chrome's own throttling of repeated connects to one host (varies with load)
-  assert.ok(paired <= CAP * 2, `paired after ${paired} ms`);
+  // cap + one 1 s connect tick + Chrome's own throttling of repeated connects to one host (varies with load; a busy
+  // CI runner went past 2× cap). Without the cap the next try would come only ~30 s after the first.
+  assert.ok(paired <= CAP * 3, `paired after ${paired} ms`);
   await browser.close();
   const closed = Date.now();
   await sleep(3000);

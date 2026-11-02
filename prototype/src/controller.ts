@@ -82,10 +82,10 @@ const lineKey = (line: string) =>
     .trim()
     .replace(/^- /, '')
     .match(/^([a-z]+(?: "[^"]*")?)/)?.[1] || null;
-// Alternatives "a, b": split only where the next part starts a locator (css=, text= or a ref), so commas inside
+// Alternatives "a, b": split only where the next part starts a locator (css=, text=, role= or a ref), so commas inside
 // a CSS selector list (css=a, b) or a text (text=Hello, world) stay.
-const ALTERNATIVE = /,\s*(?=css=|text=|(?:f\d+)?e\d+\b)/;
-const isLocator = (v: string) => /^(text|css)=/.test(v) || /\s>>\s/.test(v) || ALTERNATIVE.test(v);
+const ALTERNATIVE = /,\s*(?=css=|text=|role=|(?:f\d+)?e\d+\b)/;
+const isLocator = (v: string) => /^(text|css|role)=/.test(v) || /\s>>\s/.test(v) || ALTERNATIVE.test(v);
 const REF_FIELDS = ['click', 'type', 'hover', 'select', 'check', 'uncheck', 'upload', 'drag', 'to', 'ref', 'scroll'] as const;
 
 /** One act step (the STEP schema in server.ts); exactly one action key is set. */
@@ -142,6 +142,15 @@ export interface ControllerOptions {
 const OUTDATED_EXTENSION =
   'the connected browser extension is outdated; run npm run build:extension from prototype/, then reload the relay extension at chrome://extensions (load prototype/dist/extension if using an older copy)';
 
+type Download = { id: string; url?: string; name?: string; path?: string; bytes?: number; state: string; error?: string; reported?: 'started' | 'done' };
+
+function downloadLine(d: Download) {
+  const file = d.path || d.name || d.url || d.id;
+  if (d.state === 'complete') return `download saved ${file}${d.bytes != null ? ` (${d.bytes} bytes)` : ''}`;
+  if (d.state === 'interrupted') return `download failed: ${file}${d.error ? ` (${d.error})` : ''}`;
+  return `download started: ${file} (still saving; the next result says where it went)`;
+}
+
 /** Files the agent saves (HAR) go into one folder, by name only: a model cannot pick a path. */
 function outputPath(name: string | undefined, ext: string) {
   const dir = process.env.BBM_OUTPUT_DIR || join(homedir(), 'Downloads', 'bbm');
@@ -190,11 +199,13 @@ export class Controller {
   window: 'agent' | null;
   keepTabs: boolean;
   notice = ''; // told to the agent once, with the next tool result (e.g. after a reconnect)
+  downloads = new Map<string, Download>(); // by id, from the extension or CDP Browser.download* events
   deny: Deny | null;
   tabs: Map<string, { targetId: string; tab: Tab | null }>;
   byTarget: Map<string, string>;
   nextId: number;
-  current: string | null;
+  #current: string | null = null;
+  #used: string[] = []; // tabs that were current, oldest first: a closed current tab hands over to the one before it
   allow: Allow;
   popups: { sid: string; opener: string | undefined }[];
 
@@ -216,7 +227,6 @@ export class Controller {
     this.tabs = new Map(); // short id -> {targetId, tab}
     this.byTarget = new Map(); // targetId -> short id
     this.nextId = 1;
-    this.current = null;
     this.allow = makeAllow(allow); // fn(url) -> bool, or null
     this.popups = []; // tabs opened by pages since last act
     // Chrome dropped the debugger for a tab (another extension's frame, the user's Cancel): re-attach on next use.
@@ -224,6 +234,14 @@ export class Controller {
       const sid = targetId && this.byTarget.get(String(targetId));
       const ent = sid && this.tabs.get(sid);
       if (ent) ent.tab = null;
+    });
+    browser.conn?.on?.('Bbm.download', (d) => this.#download(d as Download));
+    browser.conn?.on?.('Browser.downloadWillBegin', ({ guid, url, suggestedFilename }) =>
+      this.#download({ id: guid, url, name: suggestedFilename, state: 'in progress' }),
+    );
+    browser.conn?.on?.('Browser.downloadProgress', ({ guid, state, receivedBytes, filePath }) => {
+      if (state === 'inProgress') return;
+      this.#download({ id: guid, state: state === 'completed' ? 'complete' : 'interrupted', bytes: receivedBytes, path: filePath });
     });
     browser.onTabCreated((t: TargetInfo) => {
       const sid = this.#register(t.targetId);
@@ -246,8 +264,31 @@ export class Controller {
       if (!sid) return;
       this.tabs.delete(sid);
       this.byTarget.delete(targetId);
-      if (this.current === sid) this.current = [...this.tabs.keys()].pop() || null;
+      if (this.current === sid) this.current = this.#previous();
     });
+  }
+
+  get current() {
+    return this.#current;
+  }
+  set current(sid: string | null) {
+    this.#current = sid;
+    if (sid) this.#used = [...this.#used.filter((u) => u !== sid && this.tabs.has(u)), sid];
+  }
+
+  /** The most recently current tab that is still open, else the newest tab. */
+  #previous(): string | null {
+    return this.#used.findLast((u) => this.tabs.has(u)) || [...this.tabs.keys()].pop() || null;
+  }
+
+  #download(update: Partial<Download> & { id: string }) {
+    const next = { ...this.downloads.get(update.id), ...update } as Download;
+    this.downloads.set(update.id, next);
+    // act reported it while it was still saving: tell the agent with the next result
+    if (next.reported === 'started' && next.state !== 'in progress') {
+      next.reported = 'done';
+      this.notice = [this.notice, downloadLine(next)].filter(Boolean).join('\n');
+    }
   }
 
   #register(targetId: string): string {
@@ -285,6 +326,9 @@ export class Controller {
         this.notice = `could not name the tab group: ${e.message}`;
       }
     }
+    // Over plain CDP, download events come only when asked for; Chrome still saves where it would.
+    if (this.browser.mode !== 'extension')
+      await this.browser.conn?.send('Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: true }).catch(() => {});
     // No tab is opened here: the first navigate (or tabs new) opens one at its URL, so no empty tab is left behind.
     for (const t of this.browser.listTabs()) this.#register(t.targetId);
     if (this.tabs.size) this.current = [...this.tabs.keys()][0];
@@ -295,7 +339,12 @@ export class Controller {
     const ent = this.tabs.get(sid);
     if (!ent) throw new Error(`no tab ${sid}; use tabs list`);
     if (!ent.tab) {
-      const session = await this.browser.attach(ent.targetId);
+      const session = await this.browser.attach(ent.targetId).catch((e: Error) => {
+        // The user (or the page) moved the tab to a page Chrome keeps from debuggers: chrome://, the New Tab page.
+        if (!/Cannot access a chrome:\/\//.test(e.message)) throw e;
+        const url = this.browser.targets.get(ent.targetId)?.url || 'chrome://';
+        throw new Error(`tab ${sid} shows the browser page ${url}: navigate it to a web page or pick another tab (tabs list, tab=)`, { cause: e });
+      });
       const tab = new Tab(this.browser, ent.targetId, session, { allow: this.allow, deny: this.deny });
       await tab.init();
       ent.tab = tab;
@@ -460,7 +509,7 @@ export class Controller {
     this.tabs.delete(sid!);
     this.byTarget.delete(ent.targetId);
     if (this.current === sid) {
-      this.current = [...this.tabs.keys()].pop() || null;
+      this.current = this.#previous();
       if (this.current) await this.#front();
     }
   }
@@ -504,6 +553,7 @@ export class Controller {
     let tab = await this.tab(sid);
     tab.events = [];
     this.popups = [];
+    const downloadsBefore = new Set(this.downloads.keys());
     const log: string[] = [];
     let failed: number | null = null;
     const t0 = Date.now();
@@ -517,8 +567,9 @@ export class Controller {
         if (process.env.BBM_TRACE) console.error(`[step] ${label} ${Date.now() - ts}ms`);
         await tab.settle({ max: st.wait ? 500 : 3000 });
         // follow a popup opened by this step
-        if (this.popups.length) {
-          const p = this.popups.pop()!;
+        const p = this.popups.pop();
+        if (p && this.tabs.has(p.sid)) {
+          // (a popup that closed at once, such as a download's, is not followed)
           this.current = p.sid;
           tab = await this.tab(p.sid);
           await this.#front(p.sid);
@@ -554,6 +605,7 @@ export class Controller {
       }
     }
     const allEvents = [...new Set(tab.events)];
+    allEvents.push(...(await this.#reportDownloads(downloadsBefore)));
     const errors = tab.console.filter((c) => c.level === 'error' && (c.ts ?? 0) >= t0).length;
     if (errors) allEvents.push(`${errors} console error(s)`);
     let out = log.join('\n');
@@ -562,12 +614,24 @@ export class Controller {
     return { text: out, ok: failed === null };
   }
 
+  // Downloads the steps started: wait a little for them to finish, then say where each one went.
+  async #reportDownloads(before: Set<string>) {
+    const started = () => [...this.downloads.values()].filter((d) => !before.has(d.id));
+    for (const t0 = Date.now(); started().some((d) => d.state === 'in progress') && Date.now() - t0 < 5000;) await new Promise((r) => setTimeout(r, 100));
+    return started().map((d) => {
+      d.reported = d.state === 'in progress' ? 'started' : 'done';
+      return downloadLine(d);
+    });
+  }
+
   async #afterSnapshot(tab: Tab, mode: string) {
     const prev = tab.lastSnapshot;
-    const snap = await tab.snapshot({ mode: prev?.mode, scope: prev?.scope });
-    tab.lastSnapshot = { lines: snap.lines, url: snap.url, mode: prev?.mode, scope: prev?.scope, modal: snap.modal?.ref };
+    // 'interactive': a whole snapshot of the actionable elements, as navigate gives; later diffs keep that mode.
+    const snapMode = mode === 'interactive' ? 'interactive' : prev?.mode;
+    const snap = await tab.snapshot({ mode: snapMode, scope: prev?.scope });
+    tab.lastSnapshot = { lines: snap.lines, url: snap.url, mode: snapMode, scope: prev?.scope, modal: snap.modal?.ref };
     // A diff only makes sense within the same scope (same page, same modal or none).
-    if (mode === 'full' || !prev || prev.url !== snap.url || prev.modal !== snap.modal?.ref) return this.#format(tab, snap, {});
+    if (mode === 'full' || mode === 'interactive' || !prev || prev.url !== snap.url || prev.modal !== snap.modal?.ref) return this.#format(tab, snap, {});
     const d = diffLines(prev.lines, snap.lines);
     if (!d.changed) return this.#header(tab, snap) + '\n(no visible change)';
     const full = snap.lines.join('\n').length;
