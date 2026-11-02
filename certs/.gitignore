@@ -1,0 +1,4 @@
+# Only public keys go in git. A private key must never be here.
+*
+!.gitignore
+!*.pub.pem
