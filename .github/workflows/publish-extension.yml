@@ -54,18 +54,39 @@ jobs:
           rm -f "$KEY"
           # The CRX header must carry the registered public key.
           node -e "const fs=require('fs');const c=fs.readFileSync(process.argv[1]);const k=fs.readFileSync(process.argv[2]);if(c.subarray(0,4).toString()!=='Cr24'||c.readUInt32LE(4)!==3||!c.subarray(0,12+c.readUInt32LE(8)).includes(k)){console.error('::error::CRX is not signed with the registered key');process.exit(1)}" "$CRX" "$RUNNER_TEMP/pub.der"
-      - uses: actions/upload-artifact@v4
-        with: { name: extension-zip, path: '${{ steps.build.outputs.zip }}' }
-      # v3: v4 dropped the auth flags and needs a publisherId.
+      - uses: actions/upload-artifact@v4 # the CRX too: it can be uploaded by hand in the dashboard
+        with:
+          name: extension
+          path: |
+            prototype/${{ steps.build.outputs.zip }}
+            prototype/${{ steps.build.outputs.crx }}
+      # curl, not chrome-webstore-upload-cli: with Verified CRX uploads the store takes the package type from
+      # X-Goog-Upload-File-Name (.crx), which the CLI does not send (the store then answers PKG_MUST_UPDATE_AS_CRX).
       - name: Upload to Chrome Web Store
         env: &cws
           EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
           CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
-        run: >
-          npx -y chrome-webstore-upload-cli@3 upload --source "${{ steps.build.outputs.crx }}"
-          --extension-id "$EXTENSION_ID" --client-id "$CLIENT_ID" --client-secret "$CLIENT_SECRET" --refresh-token "$REFRESH_TOKEN"
+          CRX: ${{ steps.build.outputs.crx }}
+        run: |
+          TOKEN=$(jq -n --arg id "$CLIENT_ID" --arg secret "$CLIENT_SECRET" --arg rt "$REFRESH_TOKEN" \
+              '{client_id: $id, client_secret: $secret, refresh_token: $rt, grant_type: "refresh_token"}' \
+            | curl -sSf -X POST -H 'Content-Type: application/json' --data-binary @- https://www.googleapis.com/oauth2/v4/token \
+            | jq -r .access_token)
+          echo "::add-mask::$TOKEN"
+          API="https://www.googleapis.com/chromewebstore/v1.1/items/$EXTENSION_ID"
+          RES=$(curl -sS -X PUT -H "Authorization: Bearer $TOKEN" -H 'x-goog-api-version: 2' \
+            -H 'X-Goog-Upload-Protocol: raw' -H "X-Goog-Upload-File-Name: $(basename "$CRX")" \
+            --data-binary @"$CRX" "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$EXTENSION_ID")
+          STATE=$(echo "$RES" | jq -r .uploadState)
+          for i in $(seq 1 30); do
+            [ "$STATE" = IN_PROGRESS ] || break
+            sleep 2
+            STATE=$(curl -sS -H "Authorization: Bearer $TOKEN" -H 'x-goog-api-version: 2' "$API?projection=DRAFT" | jq -r .uploadState)
+          done
+          if [ "$STATE" != SUCCESS ]; then echo "$RES"; echo "::error::upload state: $STATE"; exit 1; fi
+          echo "Uploaded $(basename "$CRX")" >> "$GITHUB_STEP_SUMMARY"
       - name: Submit for review
         if: inputs.publish
         env: *cws
