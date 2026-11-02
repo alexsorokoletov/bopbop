@@ -35,7 +35,7 @@ jobs:
           # The commit count only grows on main, so every upload has a higher version than the last.
           VERSION="0.1.$(git rev-list --count HEAD)"
           npm run -s build:extension -- --zip --version "$VERSION"
-          echo "zip=$(ls dist/better-browser-mcp-extension-$VERSION-*.zip)" >> "$GITHUB_OUTPUT"
+          echo "zip=$(ls dist/bopbop-extension-$VERSION-*.zip)" >> "$GITHUB_OUTPUT"
           echo "Version $VERSION" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with: { name: extension-zip, path: '${{ steps.build.outputs.zip }}' }

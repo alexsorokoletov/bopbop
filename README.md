@@ -1,6 +1,6 @@
 <p align="center"><img src="brand/icon-128.png" width="96" alt=""></p>
 
-<h1 align="center">better-browser-mcp</h1>
+<h1 align="center">bopbop</h1>
 
 <p align="center"><b>Give any AI agent your Chrome. Better than Claude in Chrome, at a third of the tokens.</b></p>
 
@@ -17,7 +17,7 @@
 
 I read through my own agent sessions. Browser agents took 1,849 screenshots and read the page as text 7 times. Most of the tokens went into looking at pages, not into doing the work.
 
-bbm is an MCP server that gives any agent (Codex, Claude Code, or any other MCP client) your real Chrome, with your sign-ins: the kind of access Claude in Chrome gives Claude. In our benchmark it does that job better than Claude in Chrome: 72% fewer tokens, 3.5× faster, and it passed all 32 runs where Claude in Chrome passed 28.
+bopbop is an MCP server that gives any agent (Codex, Claude Code, or any other MCP client) your real Chrome, with your sign-ins: the kind of access Claude in Chrome gives Claude. In our benchmark it does that job better than Claude in Chrome: 72% fewer tokens, 3.5× faster, and it passed all 32 runs where Claude in Chrome passed 28.
 
 The browser answers in text, in few calls. Open a page and you get the page. Do several things and you get back what happened.
 
@@ -45,7 +45,7 @@ That is a login in two calls. The output above is real, from a test page in [`fi
 
 | | success | tokens / task | calls | time | cost |
 |---|---|---|---|---|---|
-| **bbm** | **32/32** | **30.5k** | **3.2** | **11 s** | **$0.025** |
+| **bopbop** | **32/32** | **30.5k** | **3.2** | **11 s** | **$0.025** |
 | Playwright MCP | 32/32 | 84.8k | 7.8 | 27 s | $0.039 |
 | chrome-devtools-mcp | 32/32 | 100.7k | 6.7 | 21 s | $0.041 |
 | claude-in-chrome | 28/32 | 109.9k | 8.9 | 39 s | $0.055 |
@@ -57,7 +57,7 @@ That is a login in two calls. The output above is real, from a test page in [`fi
 
 Medians of 3 runs. Each run is checked against ground truth (the HN API, the live product page, the cart), not against what the agent says it did.
 
-| Task | bbm | claude-in-chrome |
+| Task | bopbop | claude-in-chrome |
 |---|---|---|
 | Hacker News: top story + 3 top comments | 4 calls · 35k | 5 calls · 75k |
 | Amazon: find a USB-C hub by price, rating, ports | 2 calls · 45k | 8 calls · 163k |
@@ -71,13 +71,13 @@ All runs passed (3/3) on both sides. The samples are small: treat differences un
 
 ```bash
 cd prototype && bun install        # or npm install
-claude mcp add -s user bbm -- bun "$PWD/src/server.ts"
-# Codex: codex mcp add bbm -- bun "$PWD/src/server.ts"
+claude mcp add -s user bopbop -- bun "$PWD/src/server.ts"
+# Codex: codex mcp add bopbop -- bun "$PWD/src/server.ts"
 ```
 
 Then load the Chrome extension ([2-minute guide](prototype/INSTALL.md)) and ask:
 
-> *Use bbm. Open example.com and tell me the heading.*
+> *Use bopbop. Open example.com and tell me the heading.*
 
 ## Demos
 
@@ -94,7 +94,7 @@ The extension pairs with the server by itself: no token to paste. Each video is 
 
 **It stays out of your way.** The agent works in its own tab group. It never takes your active tab and never steals focus. Up to 30 sessions share one Chrome, and each session sees only its own tabs. If you reload the extension or restart Chrome, the next call reconnects.
 
-**It does not lie about clicks.** If a click changes nothing, bbm tries once more with the keyboard. If that also fails, it reports `⚠ no effect`, not ✓.
+**It does not lie about clicks.** If a click changes nothing, bopbop tries once more with the keyboard. If that also fails, it reports `⚠ no effect`, not ✓.
 
 **It keeps your wallet closed.** `BBM_GUARD=shop-social` blocks Buy now, Place order, checkout and Post, at three levels. Hidden text never gets to the model, and lines that look like prompt injection are flagged.
 

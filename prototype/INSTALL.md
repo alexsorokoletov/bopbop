@@ -1,4 +1,4 @@
-# Install better-browser-mcp
+# Install bopbop
 
 This guide installs the MCP server, adds it to Claude Code or Codex, and connects it to your real Chrome profile.
 
@@ -28,20 +28,20 @@ Use one runtime. The server is the same file for Node and Bun.
 **Claude Code**
 
 ```bash
-claude mcp add -s user bbm -- bun "$PWD/src/server.ts"     # Bun (recommended)
-claude mcp add -s user bbm -- node "$PWD/src/server.ts"    # Node
+claude mcp add -s user bopbop -- bun "$PWD/src/server.ts"     # Bun (recommended)
+claude mcp add -s user bopbop -- node "$PWD/src/server.ts"    # Node
 ```
 
 **Codex CLI**
 
 ```bash
-codex mcp add bbm -- bun "$PWD/src/server.ts"      # Bun (recommended)
-codex mcp add bbm -- node "$PWD/src/server.ts"     # Node
+codex mcp add bopbop -- bun "$PWD/src/server.ts"      # Bun (recommended)
+codex mcp add bopbop -- node "$PWD/src/server.ts"     # Node
 ```
 
-`-s user` makes `bbm` available in all your projects. Without it, Claude Code adds it only for the current folder. Codex adds servers for all projects.
+`-s user` makes `bopbop` available in all your projects. Without it, Claude Code adds it only for the current folder. Codex adds servers for all projects.
 
-Then do a check. `claude mcp list` must show `bbm: ... ✔ Connected`. `codex mcp list` must show `bbm` with status `enabled`.
+Then do a check. `claude mcp list` must show `bopbop: ... ✔ Connected`. `codex mcp list` must show `bopbop` with status `enabled`.
 
 With no other settings, the server uses your Chrome through the relay extension (`extension` mode). Complete step 4 to load and pair it.
 
@@ -54,16 +54,16 @@ This is the default mode. It lets the agent use your sign-ins and cookies.
 3. The server added in step 3 already defaults to extension mode. If your existing entry explicitly sets another mode, replace it:
 
    ```bash
-   claude mcp remove -s user bbm
-   claude mcp add -s user bbm -e BBM_MODE=extension -- bun "$PWD/src/server.ts"
-   # Codex: codex mcp remove bbm && codex mcp add bbm --env BBM_MODE=extension -- bun "$PWD/src/server.ts"
+   claude mcp remove -s user bopbop
+   claude mcp add -s user bopbop -e BBM_MODE=extension -- bun "$PWD/src/server.ts"
+   # Codex: codex mcp remove bopbop && codex mcp add bopbop --env BBM_MODE=extension -- bun "$PWD/src/server.ts"
    ```
 
-4. Start the agent and make one browser call. Pairing is automatic: on start, the server writes a pairing token to `~/.config/better-browser-mcp/relay-token` and installs a small native messaging host (`dev.bopbop.host`) for each installed Chromium browser (Chrome, Chromium, Brave, Edge, and Vivaldi on macOS and Linux). On Windows, the server registers the host in the registry (`HKCU\Software\<browser>\NativeMessagingHosts`). Only the relay extension may call it, and it gives the extension the token. Within 30 seconds the extension pairs, with nothing to paste.
+4. Start the agent and make one browser call. Pairing is automatic: on start, the server writes a pairing token to `~/.config/bopbop/relay-token` and installs a small native messaging host (`dev.bopbop.host`) for each installed Chromium browser (Chrome, Chromium, Brave, Edge, and Vivaldi on macOS and Linux). On Windows, the server registers the host in the registry (`HKCU\Software\<browser>\NativeMessagingHosts`). Only the relay extension may call it, and it gives the extension the token. Within 30 seconds the extension pairs, with nothing to paste.
 
 If pairing does not happen (`BBM_RELAY_TOKEN` set, or `BBM_NATIVE_HOST=0`), paste the token by hand:
 
-5. Copy the token: `pbcopy < ~/.config/better-browser-mcp/relay-token`.
+5. Copy the token: `pbcopy < ~/.config/bopbop/relay-token`.
 6. Open the extension options (on `chrome://extensions`, click **Details**, then **Extension options**). Paste the token. Keep port `9333`. Click **Save**.
 
 A local build loaded from `prototype/dist/extension` is allowed automatically. To allow another unpacked copy, set `-e BBM_EXTENSION_IDS=<its id>`.
@@ -100,7 +100,7 @@ Each build prints a display version containing the release version, UTC build ti
 
 Give the agent this prompt:
 
-> Use bbm. Open https://example.com and tell me the page heading.
+> Use bopbop. Open https://example.com and tell me the page heading.
 
 The correct answer is "Example Domain". In extension mode, a new tab opens in an **Agent** tab group in your Chrome.
 
@@ -111,8 +111,8 @@ The correct answer is "Example Domain". In extension mode, a new tab opens in an
 | `extension did not connect/pair` after 2 minutes | The extension is not loaded, is turned off, or has no token. Do step 4 again. Then restart the agent. |
 | `pairing failed` on stderr | The token in the extension is not the same as the file. Paste it again. |
 | `Bbm.setLabel is not supported by the extension relay` | The connected extension is older than the server. Run `npm run build:extension` from `prototype/`, then reload the relay at `chrome://extensions`. Ensure it loads `prototype/dist/extension`, not an older copy. |
-| `all 30 bbm slots are taken (ports 9333-9362)` | 30 agent sessions already use this Chrome, or old ones did not exit. Close sessions you do not use. To pin one port, set `-e BBM_RELAY_PORT=<port>`; the extension counts its 30 slots from the base port in its options. |
-| `bbm` shows `✗ Failed to connect` | Run the command yourself: `bun src/server.ts` (or `node`). The error is on stderr. Make sure that the path is absolute. |
+| `all 30 bopbop slots are taken (ports 9333-9362)` | 30 agent sessions already use this Chrome, or old ones did not exit. Close sessions you do not use. To pin one port, set `-e BBM_RELAY_PORT=<port>`; the extension counts its 30 slots from the base port in its options. |
+| `bopbop` shows `✗ Failed to connect` | Run the command yourself: `bun src/server.ts` (or `node`). The error is on stderr. Make sure that the path is absolute. |
 | `blocked: ... is not in the allowlist (BBM_ALLOW)` | `BBM_ALLOW` is set and does not include the origin. Add it, for example `-e BBM_ALLOW='https://*.example.com'`. |
 
 More settings (`BBM_ALLOW`, `BBM_UPLOAD_ROOTS`, `connect` mode) are in [README.md](README.md).

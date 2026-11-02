@@ -12,6 +12,7 @@ import { checkColor, checkLabel, defaultLabel, type GroupColor } from './label.t
 import { DEFAULT_PORT, SLOTS } from './relay.ts';
 import { DEVICES, NETWORKS } from './emulation.ts';
 import { showCookies, redact, redactHeader, kb, durMs, phases } from './network.ts';
+import { packageVersion } from './version.ts';
 
 /** Origin allowlist matcher; null = allow all. Fails closed on unparsable URLs. */
 export function makeAllow(globs: string[] | null | undefined): Allow {
@@ -1022,7 +1023,7 @@ export class Controller {
         };
       });
     const out = outputPath(file, '.har');
-    writeFileSync(out, JSON.stringify({ log: { version: '1.2', creator: { name: 'better-browser-mcp', version: '0.1.0' }, entries } }, null, 1));
+    writeFileSync(out, JSON.stringify({ log: { version: '1.2', creator: { name: 'bopbop', version: packageVersion() }, entries } }, null, 1));
     return `saved ${entries.length} requests to ${out}`;
   }
 

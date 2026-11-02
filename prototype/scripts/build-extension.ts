@@ -44,7 +44,7 @@ manifest.version_name = `${manifest.version} (${builtAt}; ${hash.digest('hex').s
 writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 console.log(`Built ${manifest.version_name}\n${out}`);
 if (process.argv.includes('--zip')) {
-  const zip = join(root, 'dist', `better-browser-mcp-extension-${manifest.version}-${builtAt.replace(/[-:.]/g, '')}.zip`);
+  const zip = join(root, 'dist', `bopbop-extension-${manifest.version}-${builtAt.replace(/[-:.]/g, '')}.zip`);
   rmSync(zip, { force: true });
   execFileSync('zip', ['-qr', '-X', zip, '.'], { cwd: out });
   console.log(zip);

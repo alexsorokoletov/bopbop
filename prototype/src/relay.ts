@@ -1,7 +1,7 @@
 // Extension relay: a local WebSocket server that the browser extension connects to.
 // The extension speaks CDP JSON and emulates Target.*, so CDPBrowser works on top of it unchanged.
 //
-// Pairing: a shared secret (BBM_RELAY_TOKEN, or generated once into ~/.config/better-browser-mcp/relay-token, mode 0600)
+// Pairing: a shared secret (BBM_RELAY_TOKEN, or generated once into ~/.config/bopbop/relay-token, mode 0600)
 // is pasted into the extension options page. On connect both sides prove they know it with HMAC challenge-response;
 // the secret never crosses the wire. The extension runs no command before the server has proved itself, so a rogue
 // local process listening on the port cannot drive the browser.
@@ -16,14 +16,16 @@ import { CDPBrowser } from './cdp/browser.ts';
 // ws gives a Buffer for text frames, but its type also allows ArrayBuffer and fragment lists.
 const rawText = (d: Buffer | ArrayBuffer | Buffer[]) => (Array.isArray(d) ? Buffer.concat(d) : Buffer.isBuffer(d) ? d : Buffer.from(d)).toString();
 
-export const TOKEN_FILE = join(homedir(), '.config', 'better-browser-mcp', 'relay-token');
+export const TOKEN_FILE = join(homedir(), '.config', 'bopbop', 'relay-token');
+// Before the rename: an extension paired with this token keeps working.
+const OLD_TOKEN_FILE = join(homedir(), '.config', 'better-browser-mcp', 'relay-token');
 
 /** BBM_RELAY_TOKEN, or the token file (made once). */
 export function relayToken(): string {
   if (process.env.BBM_RELAY_TOKEN) return process.env.BBM_RELAY_TOKEN;
   if (existsSync(TOKEN_FILE)) return readFileSync(TOKEN_FILE, 'utf8').trim();
   mkdirSync(dirname(TOKEN_FILE), { recursive: true, mode: 0o700 });
-  const t = randomBytes(24).toString('hex');
+  const t = existsSync(OLD_TOKEN_FILE) ? readFileSync(OLD_TOKEN_FILE, 'utf8').trim() : randomBytes(24).toString('hex');
   writeFileSync(TOKEN_FILE, t + '\n', { mode: 0o600 });
   chmodSync(TOKEN_FILE, 0o600);
   return t;
@@ -79,8 +81,8 @@ export class RelayServer {
       wss.once('listening', res);
       wss.once('error', rej);
     });
-    wss.on('error', (e) => log(`[bbm] relay error: ${e.message}`));
-    log(`[bbm] waiting for the browser extension on ws://127.0.0.1:${port} (pair it with ${tokenSource})`);
+    wss.on('error', (e) => log(`[bopbop] relay error: ${e.message}`));
+    log(`[bopbop] waiting for the browser extension on ws://127.0.0.1:${port} (pair it with ${tokenSource})`);
     return relay;
   }
 
@@ -116,7 +118,7 @@ export class RelayServer {
   #onConnection(ws: WebSocket, origin: string, token: string, extensionId?: string) {
     const okOrigin = extensionId ? origin === `chrome-extension://${extensionId}` : /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
     if (!okOrigin) {
-      this.#log(`[bbm] rejected connection from origin ${JSON.stringify(origin)}`);
+      this.#log(`[bopbop] rejected connection from origin ${JSON.stringify(origin)}`);
       ws.close(1008, 'origin not allowed');
       return;
     }
@@ -124,7 +126,7 @@ export class RelayServer {
     let stage = 'hello';
     let build = 'unreported'; // Older extensions do not send build metadata.
     const fail = () => {
-      this.#log(`[bbm] pairing failed (stage ${stage})`);
+      this.#log(`[bopbop] pairing failed (stage ${stage})`);
       ws.close(1008, 'pairing failed');
     };
     const authTimer = setTimeout(fail, 5000);
@@ -143,7 +145,7 @@ export class RelayServer {
         clearTimeout(authTimer);
         ws.off('message', onAuth);
         this.#accept(ws, build).catch((e: Error) => {
-          this.#log(`[bbm] relay setup failed: ${e.message}`);
+          this.#log(`[bopbop] relay setup failed: ${e.message}`);
           ws.close();
         });
       } else fail();
@@ -160,7 +162,7 @@ export class RelayServer {
         ws.close(1013, 'a browser is already connected');
         return;
       }
-      this.#log('[bbm] the old browser link does not answer: the new one replaces it');
+      this.#log('[bopbop] the old browser link does not answer: the new one replaces it');
       this.#current = null; // browser() now waits for the new link, not the closing one
       old.conn.close();
     }
@@ -191,8 +193,8 @@ export class RelayServer {
     browser.relay = this;
     this.#current = browser;
     this.#pairings++;
-    this.#log(this.#pairings === 1 ? '[bbm] extension paired and connected' : '[bbm] extension connected again');
-    this.#log(`[bbm] extension build: ${JSON.stringify(build)}`);
+    this.#log(this.#pairings === 1 ? '[bopbop] extension paired and connected' : '[bopbop] extension connected again');
+    this.#log(`[bopbop] extension build: ${JSON.stringify(build)}`);
     for (const w of this.#waiters) w(browser);
     this.#waiters.clear();
   }
@@ -219,7 +221,7 @@ export async function listenRelayAuto({ basePort = DEFAULT_PORT, slots = SLOTS, 
       if (e.code !== 'EADDRINUSE' && !/EADDRINUSE|in use/i.test(e.message)) throw e;
     }
   }
-  throw new Error(`all ${slots} bbm slots are taken (ports ${basePort}-${basePort + slots - 1}): close a bbm session you do not use`);
+  throw new Error(`all ${slots} bopbop slots are taken (ports ${basePort}-${basePort + slots - 1}): close a bopbop session you do not use`);
 }
 
 /** One pairing, the old way: the returned browser's close() also closes the relay. Tests and scripts use it. */

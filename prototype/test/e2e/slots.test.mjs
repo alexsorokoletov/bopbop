@@ -80,7 +80,7 @@ test('when every slot is taken, the error names the range', async () => {
     ),
   );
   try {
-    await assert.rejects(listenRelayAuto({ basePort: 9520, slots: 2, token, log: () => {} }), /all 2 bbm slots are taken \(ports 9520-9521\)/);
+    await assert.rejects(listenRelayAuto({ basePort: 9520, slots: 2, token, log: () => {} }), /all 2 bopbop slots are taken \(ports 9520-9521\)/);
   } finally {
     for (const s of blockers) s.close();
   }
