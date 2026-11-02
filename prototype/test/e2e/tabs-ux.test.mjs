@@ -132,6 +132,29 @@ test('a Chrome rename failure is reported instead of claiming the group was rena
   assert.deepEqual(await groups(), []);
 });
 
+test('when the current tab closes, the tab used before it becomes current', async () => {
+  const [a, b] = [await c.newTab(`${srv.base}/login-form/?a`), await c.newTab(`${srv.base}/login-form/?b`)];
+  await c.newTab(`${srv.base}/login-form/?last`);
+  await c.selectTab(a);
+  await c.selectTab(b);
+  await c.closeTab(b);
+  assert.equal(c.current, a);
+  const [x, y] = [await c.newTab(`${srv.base}/login-form/?x`), await c.newTab(`${srv.base}/login-form/?y`)];
+  await c.newTab(`${srv.base}/login-form/?last2`);
+  await c.selectTab(x);
+  await c.selectTab(y);
+  await swEval(`chrome.tabs.remove(${+c.tabs.get(y).targetId})`); // closed by the user or the page
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(c.current, x);
+});
+
+test('an agent tab moved to a browser page (chrome://) fails with a clear message', async () => {
+  const sid = await c.newTab(`${srv.base}/login-form/`);
+  await swEval(`chrome.tabs.update(${+c.tabs.get(sid).targetId}, {url: 'chrome://version/'})`);
+  await new Promise((r) => setTimeout(r, 500));
+  await assert.rejects(c.snapshot({}), /browser page chrome:\/\/version.*navigate it to a web page or pick another tab/);
+});
+
 test('a download from an agent tab reports the saved path and size', async () => {
   await c.newTab(`${srv.base}/agent-ux/`);
   const r = (await c.act([{ click: 'text=Export CSV' }], { snapshot: 'none' })).text;

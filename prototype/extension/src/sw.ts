@@ -368,10 +368,12 @@ async function clearForeignFrames(tabId: number) {
 const sessions = Array.from({ length: SLOTS }, (_, i) => new Session(i));
 const owner = new Map<number, Session>(); // tabId -> Session
 const selfActivated = new Map<number, number>(); // tabId -> time an agent activated it (not the user)
+const windowOpened = new Map<number, number[]>(); // agent tabId -> times its page opened a window (CDP Page.windowOpen)
 
 chrome.debugger.onEvent.addListener((source, method, params: Json) => {
   const s = owner.get(source.tabId!);
   if (!s) return;
+  if (method === 'Page.windowOpen') windowOpened.set(source.tabId!, [...(windowOpened.get(source.tabId!) || []), Date.now()]);
   if (method === 'Target.attachedToTarget') s.childSession.set(params.sessionId, source.tabId!);
   if (method === 'Target.detachedFromTarget') s.childSession.delete(params.sessionId);
   s.send({ method, params, sessionId: source.sessionId || tabSession(source.tabId!) });
@@ -384,13 +386,27 @@ chrome.debugger.onDetach.addListener((source) => {
   s.send({ method: 'Target.detachedFromTarget', params: { sessionId: tabSession(source.tabId!), targetId: String(source.tabId) } });
 });
 
-// Popups opened by agent tabs join the opener's session, but only right after that session's own input:
-// a tab the user (or another extension) opens from an agent tab later stays the user's.
-chrome.tabs.onCreated.addListener((tab) => {
-  const s = tab.openerTabId != null && owner.get(tab.openerTabId);
+// Popups opened by agent tabs join the opener's session, but only right after that session's own input, and only
+// when the page itself opened a window (window.open, a target=_blank link, a form). Chrome also gives an opener to
+// a tab the user opens with Cmd+T or from the address bar while an agent tab is active: that tab stays the user's.
+async function adoptPopup(tab: chrome.tabs.Tab) {
+  const opener = tab.openerTabId;
+  const s = opener != null && owner.get(opener);
   if (!s || Date.now() - s.lastAgentInput > 3000) return;
-  void s.addToGroup(tab.id!).then(() => s.adopt(tab));
-});
+  // Each window the page opened adopts one tab.
+  const take = () => {
+    const opens = (windowOpened.get(opener) || []).filter((t) => Date.now() - t < 3000);
+    windowOpened.set(opener, opens.slice(1));
+    return opens.length > 0;
+  };
+  if (!take()) {
+    await new Promise((r) => setTimeout(r, 300)); // the CDP event may come after onCreated
+    if (!take()) return;
+  }
+  await s.addToGroup(tab.id!);
+  s.adopt(tab);
+}
+chrome.tabs.onCreated.addListener((tab) => void adoptPopup(tab));
 // A download is an agent's only when it starts right after that agent's input AND comes from one of its tabs
 // (the referrer, or the URL for a file opened directly, is an agent tab's page): the user's downloads stay private.
 const downloadOwner = new Map<number, Session>(); // download id -> session
@@ -438,6 +454,7 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   selfActivated.delete(tabId);
+  windowOpened.delete(tabId);
   const s = owner.get(tabId);
   if (!s) return;
   owner.delete(tabId);

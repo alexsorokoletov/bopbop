@@ -204,7 +204,8 @@ export class Controller {
   tabs: Map<string, { targetId: string; tab: Tab | null }>;
   byTarget: Map<string, string>;
   nextId: number;
-  current: string | null;
+  #current: string | null = null;
+  #used: string[] = []; // tabs that were current, oldest first: a closed current tab hands over to the one before it
   allow: Allow;
   popups: { sid: string; opener: string | undefined }[];
 
@@ -226,7 +227,6 @@ export class Controller {
     this.tabs = new Map(); // short id -> {targetId, tab}
     this.byTarget = new Map(); // targetId -> short id
     this.nextId = 1;
-    this.current = null;
     this.allow = makeAllow(allow); // fn(url) -> bool, or null
     this.popups = []; // tabs opened by pages since last act
     // Chrome dropped the debugger for a tab (another extension's frame, the user's Cancel): re-attach on next use.
@@ -264,8 +264,21 @@ export class Controller {
       if (!sid) return;
       this.tabs.delete(sid);
       this.byTarget.delete(targetId);
-      if (this.current === sid) this.current = [...this.tabs.keys()].pop() || null;
+      if (this.current === sid) this.current = this.#previous();
     });
+  }
+
+  get current() {
+    return this.#current;
+  }
+  set current(sid: string | null) {
+    this.#current = sid;
+    if (sid) this.#used = [...this.#used.filter((u) => u !== sid && this.tabs.has(u)), sid];
+  }
+
+  /** The most recently current tab that is still open, else the newest tab. */
+  #previous(): string | null {
+    return this.#used.findLast((u) => this.tabs.has(u)) || [...this.tabs.keys()].pop() || null;
   }
 
   #download(update: Partial<Download> & { id: string }) {
@@ -326,7 +339,12 @@ export class Controller {
     const ent = this.tabs.get(sid);
     if (!ent) throw new Error(`no tab ${sid}; use tabs list`);
     if (!ent.tab) {
-      const session = await this.browser.attach(ent.targetId);
+      const session = await this.browser.attach(ent.targetId).catch((e: Error) => {
+        // The user (or the page) moved the tab to a page Chrome keeps from debuggers: chrome://, the New Tab page.
+        if (!/Cannot access a chrome:\/\//.test(e.message)) throw e;
+        const url = this.browser.targets.get(ent.targetId)?.url || 'chrome://';
+        throw new Error(`tab ${sid} shows the browser page ${url}: navigate it to a web page or pick another tab (tabs list, tab=)`, { cause: e });
+      });
       const tab = new Tab(this.browser, ent.targetId, session, { allow: this.allow, deny: this.deny });
       await tab.init();
       ent.tab = tab;
@@ -491,7 +509,7 @@ export class Controller {
     this.tabs.delete(sid!);
     this.byTarget.delete(ent.targetId);
     if (this.current === sid) {
-      this.current = [...this.tabs.keys()].pop() || null;
+      this.current = this.#previous();
       if (this.current) await this.#front();
     }
   }
