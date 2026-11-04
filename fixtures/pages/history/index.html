@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>History first</title></head>
+<body><h1 id="heading">History first</h1><a href="?second">Second page</a>
+<script>
+  const second = new URLSearchParams(location.search).has('second');
+  document.title = document.getElementById('heading').textContent = second ? 'History second' : 'History first';
+  window.restored = false;
+  addEventListener('pageshow', (event) => { window.restored = event.persisted; });
+</script></body></html>

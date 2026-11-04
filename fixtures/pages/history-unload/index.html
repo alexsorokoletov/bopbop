@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>History unload</title>
+<script>
+  onbeforeunload = () => {
+    if (!window.__armed) return;
+    history.replaceState(null, '', '/api/history-target');
+  };
+</script>
+</head><body><h1>History unload</h1></body></html>
