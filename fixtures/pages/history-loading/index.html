@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>History loading</title>
+<script>
+  history.replaceState(null, '', '?state=inline');
+  window.__domReady = false;
+  addEventListener('DOMContentLoaded', () => { window.__domReady = true; });
+</script>
+<script src="/api/history-script"></script>
+</head><body><h1>History loading</h1></body></html>

@@ -172,7 +172,11 @@ async function serveStatic(req, res, pathname, origins) {
       body.toString('utf8').replaceAll('__MAIN_ORIGIN__', origins.main).replaceAll('__ALT_ORIGIN__', origins.alt),
     );
   }
-  send(res, 200, body, { 'content-type': MIME[ext] || 'application/octet-stream' });
+  send(res, 200, body, {
+    'content-type': MIME[ext] || 'application/octet-stream',
+    // A no-store document cannot use the back-forward cache with a debugger.
+    ...(pathname === '/history/' ? { 'cache-control': 'max-age=0' } : {}),
+  });
 }
 
 function makeHandler(store, ports, role, opts) {
@@ -210,6 +214,16 @@ async function handleApi(req, res, url, store, opts) {
     return send(res, 200, { ok: true });
   }
   if (p === '/api/health') return send(res, 200, { ok: true });
+  if (p === '/api/history-script' && req.method === 'GET') {
+    // The blocking script must stay pending after the 3 s settle limit.
+    await new Promise((r) => setTimeout(r, 5000));
+    return send(res, 200, 'window.__late = true;', { 'content-type': 'text/javascript; charset=utf-8' });
+  }
+  if (p === '/api/history-target' && req.method === 'GET') {
+    await new Promise((r) => setTimeout(r, 5000));
+    return send(res, 200, '<!doctype html><title>History target</title><script>addEventListener("DOMContentLoaded",()=>window.__domReady=true)</script><body>History target',
+      { 'content-type': 'text/html; charset=utf-8' });
+  }
   if (p === '/api/slow' && req.method === 'GET') {
     // network tests: a known wait and a session cookie whose value must never leak in full
     await new Promise((r) => setTimeout(r, Math.min(+(q.get('ms') || 300), 5000)));

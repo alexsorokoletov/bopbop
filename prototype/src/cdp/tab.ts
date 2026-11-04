@@ -132,6 +132,7 @@ export class Tab {
   lastSnapshot: LastSnapshot | null;
   closed: boolean;
   loads: number;
+  historyChanges: number;
   ctxWaiters: (() => void)[];
   emulation: { metrics?: Json } | null = null;
 
@@ -161,6 +162,7 @@ export class Tab {
     this.lastSnapshot = null; // {lines: string[], url}
     this.closed = false;
     this.loads = 0; // DOMContentLoaded counter of the main frame
+    this.historyChanges = 0;
     this.ctxWaiters = [];
   }
 
@@ -200,7 +202,7 @@ export class Tab {
       const f = this.#frame(frameId, s);
       f.parentId = parentFrameId;
     });
-    s.on('Page.frameNavigated', ({ frame }) => {
+    s.on('Page.frameNavigated', ({ frame, type }) => {
       if (foreignFrame(frame.url)) {
         this.foreign.add(frame.id);
         return;
@@ -211,6 +213,8 @@ export class Tab {
         if (isRoot) {
           this.#setMain(frame.id);
           this.events.push(`navigated ${frame.url}`);
+          // Cache restores do not fire DOMContentLoaded.
+          if (type === 'BackForwardCacheRestore') this.historyChanges++;
         }
       } else f.parentId = frame.parentId;
     });
@@ -223,10 +227,14 @@ export class Tab {
       }
     });
     s.on('Page.javascriptDialogOpening', (p) => this.#onDialog(s, p));
-    if (isRoot)
+    if (isRoot) {
       s.on('Page.domContentEventFired', () => {
         this.loads++;
       });
+      s.on('Page.navigatedWithinDocument', ({ frameId }) => {
+        if (frameId === this.mainFrameId) this.historyChanges++;
+      });
+    }
     s.on('Runtime.consoleAPICalled', (p) =>
       this.#pushConsole({
         level: p.type === 'warning' ? 'warn' : p.type,
@@ -807,23 +815,56 @@ export class Tab {
 
   async navigate(url: string) {
     const loads = this.loads;
-    let newDoc = true;
-    if (url === 'back' || url === 'forward') {
-      const { currentIndex, entries } = await this.root.send('Page.getNavigationHistory');
-      const e = entries[currentIndex + (url === 'back' ? -1 : 1)];
-      if (!e) throw new Error(`no ${url} history entry`);
-      await this.root.send('Page.navigateToHistoryEntry', { entryId: e.id });
-    } else if (url === 'reload') {
-      await this.root.send('Page.reload');
-    } else {
-      const res = await this.root.send('Page.navigate', { url });
-      if (res.errorText) throw new Error(`navigation failed: ${res.errorText}`);
-      newDoc = !!res.loaderId;
+    const historyChanges = this.historyChanges;
+    const history = url === 'back' || url === 'forward';
+    const completion = { committed: false, restored: false, initiation: '' };
+    // The current document can change history before Page.frameNavigated.
+    const offStart = history
+      ? this.root.on('Page.frameStartedNavigating', ({ frameId, navigationType }) => {
+          if (frameId !== this.mainFrameId) return;
+          if (!completion.initiation || navigationType === 'historyDifferentDocument') completion.initiation = navigationType;
+        })
+      : undefined;
+    const off = history
+      ? this.root.on('Page.frameNavigated', ({ frame, type }) => {
+          if (frame.parentId || frame.id !== this.mainFrameId) return;
+          if (type === 'BackForwardCacheRestore') completion.restored = true;
+          else completion.committed = true;
+        })
+      : undefined;
+    try {
+      let newDoc = true;
+      if (history) {
+        const { currentIndex, entries } = await this.root.send('Page.getNavigationHistory');
+        const e = entries[currentIndex + (url === 'back' ? -1 : 1)];
+        if (!e) throw new Error(`no ${url} history entry`);
+        await this.root.send('Page.navigateToHistoryEntry', { entryId: e.id });
+      } else if (url === 'reload') {
+        await this.root.send('Page.reload');
+      } else {
+        const res = await this.root.send('Page.navigate', { url });
+        if (res.errorText) throw new Error(`navigation failed: ${res.errorText}`);
+        newDoc = !!res.loaderId;
+      }
+      const tl = Date.now();
+      if (newDoc) {
+        if (history) {
+          // A new document's inline history changes do not complete its load.
+          while (
+            this.loads <= loads &&
+            !completion.restored &&
+            (completion.committed || (completion.initiation && completion.initiation !== 'historySameDocument') || this.historyChanges <= historyChanges) &&
+            Date.now() - tl < 15000
+          )
+            await sleep(30);
+        } else await this.waitLoad(loads);
+      }
+      if (process.env.BBM_TRACE) console.error(`[navigate] load ${Date.now() - tl}ms loads=${this.loads}`);
+      await this.settle({ max: 3000 });
+    } finally {
+      offStart?.();
+      off?.();
     }
-    const tl = Date.now();
-    if (newDoc) await this.waitLoad(loads);
-    if (process.env.BBM_TRACE) console.error(`[navigate] load ${Date.now() - tl}ms loads=${this.loads}`);
-    await this.settle({ max: 3000 });
   }
 
   // Wait until DOMContentLoaded fired after the given load counter.
